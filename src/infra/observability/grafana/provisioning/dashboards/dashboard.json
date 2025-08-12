@@ -1,0 +1,93 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "title": "Agentic API \u2014 Health",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Request Rate",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m]))",
+          "legendFormat": "req/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Error Rate (5xx)",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))",
+          "legendFormat": "5xx/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Latency (s) by path",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_latency_seconds_bucket[5m])) by (le,path))",
+          "legendFormat": "{{path}} p95"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Tokens per minute (by tenant)",
+      "targets": [
+        {
+          "expr": "sum(rate(tokens_used_total[1m])) by (tenant_id)",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      }
+    },
+    {
+      "type": "logs",
+      "title": "API Logs",
+      "options": {
+        "showLabels": false,
+        "showTime": true
+      },
+      "targets": [
+        {
+          "expr": "{job=\"dockerlogs\"} |~ \"agentic-backend|uvicorn|api\""
+        }
+      ],
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      }
+    }
+  ],
+  "schemaVersion": 38,
+  "version": 1
+}

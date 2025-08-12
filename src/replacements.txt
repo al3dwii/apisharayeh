@@ -1,0 +1,4 @@
+# Replace any OpenAI-style key occurrences with a placeholder
+regex:sk-[A-Za-z0-9_-]{20,}==>***REMOVED***
+# If your .env lines leaked, scrub them too
+regex:OPENAI_API_KEY\s*=\s*sk-[A-Za-z0-9_-]{20,}==>OPENAI_API_KEY=***REMOVED***

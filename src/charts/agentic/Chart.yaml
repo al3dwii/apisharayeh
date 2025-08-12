@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agentic
+description: Agentic backend (API + worker)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

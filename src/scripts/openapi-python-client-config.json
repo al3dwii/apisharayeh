@@ -1,0 +1,7 @@
+{
+  "package_name": "agentic_backend_client",
+  "project_name_override": "agentic-backend-client",
+  "version": "0.1.0",
+  "field_on_success_status": null,
+  "use_path_prefixes_for_title_model_names": true
+}

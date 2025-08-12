@@ -1,0 +1,40 @@
+name: Docker Publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*.*.*"]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ${{ github.repository }}/agentic-api
+  IMAGE_WORKER: ${{ github.repository }}/agentic-worker
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push API
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/Dockerfile.api
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/agentic-api:${{ github.ref_name }}
+      - name: Build & push Worker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/Dockerfile.worker
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/agentic-worker:${{ github.ref_name }}

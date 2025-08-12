@@ -1,0 +1,10 @@
+{
+  "name": "agentic-backend",
+  "private": true,
+  "devDependencies": {
+    "openapi-typescript": "^6.7.5"
+  },
+  "scripts": {
+    "sdk:ts": "OPENAPI_URL=http://localhost:8080/openapi.json OUT_TS=sdks/typescript npx openapi-typescript $OPENAPI_URL -o $OUT_TS/index.ts"
+  }
+}
