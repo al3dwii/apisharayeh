@@ -1,0 +1,8 @@
+{
+  email {env.ACME_EMAIL}
+}
+
+api.sharayeh.com {
+  encode zstd gzip
+  reverse_proxy api:8080
+}

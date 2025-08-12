@@ -1,0 +1,29 @@
+# secrets & local env
+.env
+*.env
+.env.*
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.pytest_cache/
+.mypy_cache/
+
+# os/editor
+.DS_Store
+*.swp
+
+# local data / volumes
+pg_data/
+redis_data/
+caddy_data/
+caddy_config/
+artifacts/
+data/
+dist/
+build/
+
+# docker
+*.pid
