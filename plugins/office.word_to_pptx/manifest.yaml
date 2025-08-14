@@ -1,0 +1,17 @@
+id: office.word_to_pptx
+name: Word to PowerPoint
+version: 1.0.0
+runtime: dsl
+inputs:
+  type: object
+  required: [file_url, title]
+  properties:
+    file_url: { type: string, format: uri }
+    title:    { type: string }
+    max_slides: { type: integer, minimum: 1, default: 12 }
+outputs:
+  type: object
+  properties:
+    pptx_url: { type: string, format: uri }
+resources: { queue: cpu }
+permissions: { net_fetch: true, write_artifacts: true }

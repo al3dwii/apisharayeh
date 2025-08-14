@@ -1,0 +1,13 @@
+llm:
+  default: openai:gpt-4o-mini
+mt:
+  default: openai:gpt-4o-mini
+  rules:
+    - when: { target_lang: "ar" }
+      use: hf:nllb-200-3.3B
+asr:
+  default: whisperx:large-v3
+tts:
+  default: azure:neural
+ocr:
+  default: paddleocr:server

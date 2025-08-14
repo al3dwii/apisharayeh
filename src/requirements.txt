@@ -32,3 +32,9 @@ opentelemetry-instrumentation-httpx==0.48b0
 opentelemetry-instrumentation-redis==0.48b0
 opentelemetry-instrumentation-logging==0.48b0
 PyJWT[crypto]==2.8.0
+psycopg[binary]>=3.1,<4
+
+PyYAML==6.0.2
+jsonschema==4.23.0
+jsonpath-ng==1.6.1
+watchdog==5.0.2

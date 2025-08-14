@@ -1,0 +1,10 @@
+llm:
+  default: openai:gpt-4o-mini
+mt:
+  default: openai:gpt-4o-mini
+asr:
+  default: whisperx:large-v3
+tts:
+  default: azure:neural
+ocr:
+  default: paddleocr:server

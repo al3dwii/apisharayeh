@@ -1,11 +1,19 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+
 from app.core.config import settings
 from app.core.observability import setup_otel
 from app.core.metrics import MetricsMiddleware, metrics_app
+
 from app.api.v1 import agents, jobs, events, packs
+from app.api.v1 import services as services_api  # NEW: services endpoints
+
 from app.services.db import init_models
+from app.kernel.plugins.loader import (
+    registry as plugin_registry,  # NEW: plugin registry
+    start_watcher,                # NEW: filesystem watcher for hot-reload
+)
 
 import os
 
@@ -23,19 +31,27 @@ app.mount(
 
 setup_otel(app)
 
+
 @app.get("/health")
 async def health():
     return JSONResponse({"ok": True, "env": settings.ENV})
 
+
 # API routers
-app.include_router(agents.router, prefix="/v1", tags=["agents"])
-app.include_router(jobs.router,   prefix="/v1", tags=["jobs"])
-app.include_router(events.router, prefix="/v1", tags=["events"])
-app.include_router(packs.router)  # GET /v1/packs
+app.include_router(agents.router,   prefix="/v1", tags=["agents"])
+app.include_router(jobs.router,     prefix="/v1", tags=["jobs"])
+app.include_router(events.router,   prefix="/v1", tags=["events"])
+app.include_router(packs.router)                      # GET /v1/packs
+app.include_router(services_api.router, prefix="/v1", tags=["services"])  # NEW
+
 
 @app.on_event("startup")
 async def on_startup():
     await init_models()
+    # Boot plugin registry and begin hot-reloading manifests
+    plugin_registry.refresh()
+    start_watcher()
+
 
 # Prometheus metrics
 app.mount("/metrics", metrics_app)

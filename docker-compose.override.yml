@@ -1,0 +1,8 @@
+services:
+  api:
+    environment:
+      PLUGINS_DIR: /srv/plugins
+      MODELS_CONFIG: /srv/config/models.yaml
+      SERVICE_FLAGS: "*"
+    volumes:
+      - ./plugins:/srv/plugins

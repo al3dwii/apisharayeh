@@ -1,0 +1,12 @@
+nodes:
+  - id: fetch
+    op: io.fetch
+    in:  { url: "{{inputs.file_url}}" }
+  - id: parse
+    op: doc.parse_docx_outline
+    in:  { path: "@fetch.file", max_slides: "{{ inputs.max_slides | int }}" }
+  - id: build
+    op: ppt.build_from_outline
+    in:  { outline: "@parse.outline", title: "{{inputs.title}}" }
+outputs:
+  pptx_url: "@build.url"
