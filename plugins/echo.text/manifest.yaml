@@ -1,0 +1,14 @@
+id: echo.text
+name: Echo Text
+version: 1.0.0
+runtime: inproc
+entrypoint: app.plugins.echo.impl:run
+inputs:
+  type: object
+  required: [message]
+  properties:
+    message: { type: string }
+outputs:
+  type: object
+  properties:
+    echoed: { type: string }
