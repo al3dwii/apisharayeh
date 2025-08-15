@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:16-alpine
@@ -5,7 +7,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-agentic}
-    volumes: [pg_data:/var/lib/postgresql/data]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agentic}"]
       interval: 5s
@@ -17,7 +20,9 @@ services:
 
   migrate:
     build: .
-    depends_on: { db: { condition: service_healthy } }
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL_SYNC}
       ENV: ${ENV}
@@ -26,7 +31,9 @@ services:
 
   api:
     build: .
-    depends_on: [migrate, redis]
+    depends_on:
+      - migrate
+      - redis
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       ARTIFACTS_DIR: ${ARTIFACTS_DIR}
@@ -39,20 +46,23 @@ services:
       RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN}
       RATE_LIMIT_TENANT_PER_MIN: ${RATE_LIMIT_TENANT_PER_MIN}
       PYTHONPATH: /srv
-      PLUGINS_DIR: /srv/plugins        # <-- add this
+      PLUGINS_DIR: /srv/plugins
       MODELS_CONFIG: /srv/config/models.yaml
       SERVICE_FLAGS: "*"
-
     volumes:
-      - "./artifacts:${ARTIFACTS_DIR}" # <-- fix formatting
-      - "./plugins:/srv/plugins"       # <-- mount plugins
+      # repo-root mounts (compose file is in ./src)
+      - "../artifacts:${ARTIFACTS_DIR}"
+      - "../plugins:/srv/plugins"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080
-    expose: ["8080"]
+    ports: ["8081:8080"]   # convenient direct access for dev
+    expose: ["8080"]       # for internal reverse proxy (caddy)
     restart: unless-stopped
 
   worker:
     build: .
-    depends_on: [migrate, redis]
+    depends_on:
+      - migrate
+      - redis
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       ARTIFACTS_DIR: ${ARTIFACTS_DIR}
@@ -63,15 +73,21 @@ services:
       APP_NAME: ${APP_NAME}
       WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET}
       PYTHONPATH: /srv
-
-    volumes: ["./artifacts:${ARTIFACTS_DIR}"]
+      PLUGINS_DIR: /srv/plugins
+      MODELS_CONFIG: /srv/config/models.yaml
+    volumes:
+      - "../artifacts:${ARTIFACTS_DIR}"
+      - "../plugins:/srv/plugins"
     command: celery -A app.workers.celery_app worker -Q cpu -P solo -c 1 --loglevel=INFO
     restart: unless-stopped
 
   caddy:
     image: caddy:2
-    depends_on: [api]
-    ports: ["80:80", "443:443"]
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
     volumes:

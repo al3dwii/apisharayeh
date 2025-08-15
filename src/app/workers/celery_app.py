@@ -1,3 +1,5 @@
+# /Users/omair/apisharayeh/src/app/workers/celery_app.py
+
 import asyncio
 import inspect
 import traceback
@@ -16,6 +18,7 @@ from app.services.models import ModelRouter
 from app.services.tools import ToolRouter
 from app.kernel.plugins.spec import ServiceManifest
 
+
 celery = Celery("agentic")
 celery.conf.broker_url = settings.REDIS_URL_QUEUE
 celery.conf.result_backend = settings.REDIS_URL_QUEUE
@@ -30,6 +33,7 @@ celery.conf.update(
     task_time_limit=60 * 30,        # hard limit: 30 min
     task_soft_time_limit=60 * 28,   # soft limit: 28 min
 )
+
 
 # ---------------------------------------------------------------------------
 # run_agent_job (legacy packs/agents)
@@ -60,8 +64,9 @@ def run_agent_job(
     from app.services.webhooks import enqueue_delivery
     from app.services.events import emit_event
 
+    # optional redis for builders
     try:
-        from app.memory.redis import get_redis  # optional
+        from app.memory.redis import get_redis
         r = get_redis()
     except Exception:
         r = None  # non-fatal
@@ -145,6 +150,7 @@ def run_agent_job(
 
     asyncio.run(_run())
 
+
 # ---------------------------------------------------------------------------
 # execute_service_job (NEW: plugins runtime) — backward compatible
 # ---------------------------------------------------------------------------
@@ -158,8 +164,8 @@ def execute_service_job(*args, **kwargs) -> None:
     Backward-compatible task entrypoint for plugin services.
 
     Supports BOTH invocation shapes:
-      - New:   execute_service_job(job_id)
-      - Legacy:execute_service_job(tenant_id, job_id, inputs, webhook_url=None)
+      - New (simpler):   execute_service_job(job_id)
+      - Legacy (API):    execute_service_job(tenant_id, job_id, inputs, webhook_url=None)
 
     The job row (manifest_snapshot, input_json, tenant_id) is the source of truth.
     """
@@ -183,17 +189,40 @@ def execute_service_job(*args, **kwargs) -> None:
         """Synchronous .emit called by DSL; forwards to async emit_event."""
         def __init__(self, tenant_id: str):
             self.tenant_id = tenant_id
-        def emit(self, job_id: str, step: str, payload: dict | None = None):
+
+        def emit(self, *e_args, **e_kwargs):
+            """
+            Accept legacy (job_id, step, payload) and extended
+            (tenant_id, job_id, step, status, payload) forms.
+            """
+            # Normalize
+            if len(e_args) >= 5:
+                tenant_id, j_id, step, status, payload = e_args[:5]
+            elif len(e_args) == 4:
+                tenant_id, j_id, step, payload = e_args[:4]
+                status = e_kwargs.get("status", "info")
+            elif len(e_args) == 3:
+                j_id, step, payload = e_args
+                tenant_id = self.tenant_id
+                status = e_kwargs.get("status", "info")
+            else:
+                tenant_id = e_kwargs.get("tenant_id", self.tenant_id)
+                j_id = e_kwargs.get("job_id")
+                step = e_kwargs.get("step") or e_kwargs.get("event") or "event"
+                status = e_kwargs.get("status", "info")
+                payload = e_kwargs.get("payload", {})
+
             try:
                 asyncio.get_event_loop().create_task(
-                    emit_event(self.tenant_id, job_id, step=step, status="info", payload=payload or {})
+                    emit_event(tenant_id, j_id, step=step, status=status, payload=payload or {})
                 )
             except RuntimeError:
-                asyncio.run(emit_event(self.tenant_id, job_id, step=step, status="info", payload=payload or {}))
+                asyncio.run(emit_event(tenant_id, j_id, step=step, status=status, payload=payload or {}))
 
     async def _run() -> None:
         # 1) fetch job + manifest snapshot & mark running
         async with SessionLocal() as session:
+            # NOTE: We need tenant_id from the row before we can set the RLS GUC.
             res = await session.execute(select(Job).where(Job.id == job_id))
             job = res.scalar_one_or_none()
             if not job:
@@ -211,12 +240,14 @@ def execute_service_job(*args, **kwargs) -> None:
         # 2) reconstruct manifest + run
         manifest = ServiceManifest.model_validate(job.manifest_snapshot or {}) if job.manifest_snapshot else None
         if manifest is None and job.service_id:
-            # Fallback to current registry (less ideal for determinism, but ok)
+            # Fallback to current registry (less ideal for determinism, but OK)
             manifest = plugin_registry.get(job.service_id)
 
         models = ModelRouter()
-        tools  = ToolRouter(models=models)
-        ctx    = KernelContext(job_id=job_id, events=_EventsBridge(tenant_id), artifacts=None, models=models, tools=tools)
+        tools = ToolRouter(models=models)
+
+        # IMPORTANT: KernelContext expects (tenant_id, job_id, events, artifacts, models, tools)
+        ctx = KernelContext(tenant_id, job_id, _EventsBridge(tenant_id), None, models, tools)
 
         outputs = None
         err_txt = None
@@ -233,6 +264,7 @@ def execute_service_job(*args, **kwargs) -> None:
             job = res.scalar_one_or_none()
             if not job:
                 return
+
             if err_txt:
                 job.status = "failed"
                 job.error = (err_txt or "")[:4000]
@@ -245,6 +277,7 @@ def execute_service_job(*args, **kwargs) -> None:
                 await emit_event(tenant_id, job_id, step="service.end", status="succeeded", payload=outputs or {})
 
     asyncio.run(_run())
+
 
 # ---------------------------------------------------------------------------
 # deliver_webhook  (NOTE: requires enqueue to pass tenant_id)
@@ -268,6 +301,7 @@ def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
 
     async def _send() -> None:
         async with SessionLocal() as session:
+            # Set tenant BEFORE first SELECT (RLS)
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
 
             res = await session.execute(select(WebhookDelivery).where(WebhookDelivery.id == delivery_id))
