@@ -1,24 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, status
 from pydantic import BaseModel, Field
 import uuid
-from sqlalchemy import select
+from sqlalchemy import select, text
+from jsonschema import Draft202012Validator as DraftValidator
 
 from app.core.auth import get_tenant
 from app.core.rate_limit import check_rate_limit
 from app.services.db import tenant_session
 from app.services.idempotency import put_if_absent, get_job_for_key
 from app.models.job import Job
+from app.kernel.plugins.spec import ServiceManifest
 
 # Legacy packs registry & worker
 from app.packs.registry import get_registry
 from app.workers.celery_app import run_agent_job
 
-# NEW: plugins registry & worker
-from app.kernel.plugins.loader import registry as plugin_registry
+# Worker for plugins (native/in-proc or DSL executed inside the worker)
 from app.workers.celery_app import execute_service_job
 
 
-router = APIRouter()
+router = APIRouter(tags=["jobs"])
 
 
 class JobCreate(BaseModel):
@@ -42,6 +43,27 @@ def _sanitize_input(req: JobCreate) -> dict:
     return data
 
 
+async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) -> ServiceManifest:
+    sql = text(
+        """
+        SELECT pr.spec
+        FROM tenant_plugins tp
+        JOIN plugin_registry pr
+          ON pr.service_id = tp.service_id AND pr.version = tp.version
+        WHERE tp.tenant_id = :tid
+          AND tp.service_id = :sid
+          AND tp.enabled = TRUE
+          AND pr.enabled = TRUE
+        LIMIT 1
+        """
+    )
+    row = (await session.execute(sql, {"tid": tenant_id, "sid": service_id})).mappings().first()
+    if not row:
+        # not enabled / unknown for this tenant
+        raise HTTPException(status_code=403, detail=f"Service '{service_id}' not enabled for this tenant")
+    return ServiceManifest.model_validate(row["spec"])
+
+
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_job(
     req: JobCreate,
@@ -54,17 +76,19 @@ async def create_job(
     is_plugin = bool(req.service_id)
 
     # 1) Validate the requested target (plugin OR legacy pack/agent)
-    manifest = None
+    manifest: ServiceManifest | None = None
     if is_plugin:
-        try:
-            manifest = plugin_registry.get(req.service_id)  # raises KeyError if unknown
-            plugin_registry.validate_inputs(req.service_id, req.inputs or {})
-        except KeyError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown service_id '{req.service_id}'")
+        # Governance: resolve manifest from DB per-tenant and validate inputs
+        async with tenant_session(tenant.id) as session:
+            manifest = await resolve_manifest_for_tenant(session, tenant.id, req.service_id)  # raises 403 if not allowed
+        DraftValidator(manifest.inputs or {"type": "object"}).validate(req.inputs or {})
     else:
         # Legacy path: require pack & agent
         if not req.pack or not req.agent:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "pack and agent are required (or provide service_id)")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "pack and agent are required (or provide service_id)",
+            )
         registry = get_registry()
         pack_map = registry.get(req.pack)
         if not pack_map or req.agent not in pack_map:
@@ -100,6 +124,7 @@ async def create_job(
     # 3) Create job row
     async with tenant_session(tenant.id) as session:
         if is_plugin:
+            assert manifest is not None  # for type-checkers
             job = Job(
                 id=job_id,
                 tenant_id=tenant.id,
@@ -125,7 +150,11 @@ async def create_job(
     # 4) Enqueue task
     try:
         if is_plugin:
-            queue = (job.manifest_snapshot.get("resources") or {}).get("queue", "cpu") if job.manifest_snapshot else "cpu"
+            queue = (
+                (job.manifest_snapshot.get("resources") or {}).get("queue", "cpu")
+                if getattr(job, "manifest_snapshot", None)
+                else "cpu"
+            )
             # enqueue with ONLY job_id to match worker signature
             execute_service_job.apply_async(args=[job_id], queue=queue)
         else:
