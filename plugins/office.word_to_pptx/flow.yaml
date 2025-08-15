@@ -4,7 +4,7 @@ nodes:
     in:  { url: "{{inputs.file_url}}" }
   - id: parse
     op: doc.parse_docx_outline
-    in:  { path: "@fetch.file", max_slides: "{{ inputs.max_slides | int }}" }
+    in:  { path: "@fetch.file", max_slides: "{{inputs.max_slides}}" }
   - id: build
     op: ppt.build_from_outline
     in:  { outline: "@parse.outline", title: "{{inputs.title}}" }
