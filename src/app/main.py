@@ -58,6 +58,7 @@ async def on_startup():
 app.mount("/metrics", metrics_app)
 
 from app.kernel.plugins.loader import registry as plugin_registry, start_watcher
+from app.services.registry_store import sync_all_from_loader
 
 @app.on_event("startup")
 async def plugins_bootstrap():
