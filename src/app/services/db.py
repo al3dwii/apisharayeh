@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text, event
+from sqlalchemy.pool import NullPool  # <-- avoid loop-crossing issues by not reusing conns
 
 from app.core.config import settings
 from app.models.base import Base  # keeps imports consistent even if unused here
@@ -15,6 +16,7 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
+    poolclass=NullPool,  # important for Celery/async loops; don't share connections across loops
 )
 
 # Optional: per-connection session defaults (statement timeout, timezone, app name)
@@ -67,7 +69,10 @@ async def tenant_session(tenant_id: str) -> AsyncIterator[AsyncSession]:
         try:
             # Ensure we're inside an active transaction before SET LOCAL
             # SQLAlchemy 2.x autbegins a transaction on first execute.
-            await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"),{"tid": tenant_id},)
+            await session.execute(
+                text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": tenant_id},
+            )
             yield session
         except Exception:
             # Safety: rollback on error so the connection isn't left in a bad state
