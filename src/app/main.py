@@ -1,3 +1,4 @@
+from app.api.v1.services import router as services_router
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,3 +56,17 @@ async def on_startup():
 
 # Prometheus metrics
 app.mount("/metrics", metrics_app)
+
+from app.kernel.plugins.loader import registry as plugin_registry, start_watcher
+
+@app.on_event("startup")
+async def plugins_bootstrap():
+    plugin_registry.refresh()
+    try:
+        env = (settings.ENV or "dev").lower()
+    except Exception:
+        env = "dev"
+    if env == "dev":
+        start_watcher()
+
+app.include_router(services_router)
