@@ -1,8 +1,8 @@
 services:
-  api:
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    working_dir: /srv/src
     environment:
-      PLUGINS_DIR: /srv/plugins
-      MODELS_CONFIG: /srv/config/models.yaml
-      SERVICE_FLAGS: "*"
-    volumes:
-      - ./plugins:/srv/plugins
+      - PYTHONPATH=/srv/src:/srv

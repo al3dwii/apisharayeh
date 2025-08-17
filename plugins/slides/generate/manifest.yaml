@@ -1,0 +1,52 @@
+# plugins/slides/generate/manifest.yaml
+id: slides.generate
+name: "Slides: Generate"
+version: "1.0.0"
+runtime: "inproc"
+entrypoint: "app.plugins.slides_generate.impl:run"
+
+inputs:
+  type: object
+  properties:
+    prompt:
+      type: string
+    word_url:
+      type: string
+    pdf_url:
+      type: string
+    max_slides:
+      type: integer
+      default: 12
+      minimum: 1
+      maximum: 60
+    language:
+      type: string
+      default: ar
+    theme:
+      type: string
+      default: academic
+    image_strategy:
+      type: string
+      enum: [search, generate, hybrid, none]
+      default: hybrid
+    image_provider:
+      type: string
+      enum: [unsplash, bing, sdxl]
+  anyOf:
+    - required: ["prompt"]
+    - required: ["word_url"]
+    - required: ["pdf_url"]
+
+outputs:
+  type: object
+  properties:
+    pptx_url:
+      type: string
+    pdf_url:
+      type: string
+    html_zip_url:
+      type: string
+    outline:
+      type: array
+    slides_html:
+      type: array

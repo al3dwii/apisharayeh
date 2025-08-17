@@ -1,0 +1,28 @@
+
+<section class="slide two-col" dir="{{ dir }}" lang="{{ lang }}" style="font-family: Tajawal, system-ui; min-height: 600px; padding: 56px 64px;">
+  <h3 style="margin:0 0 16px 0; font-size: 36px; color:#0f172a;">{{ slide.title }}</h3>
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <ul style="font-size: 21px; color:#0f172a; margin:0; padding-{{ 'right' if dir=='rtl' else 'left' }}: 22px;">
+      {% for b in left %}
+      <li style="margin: 8px 0;">{{ b.text }}
+        {% if b.subs %}
+        <ul style="opacity:.95; font-size: 18px; margin: 8px 0; padding-{{ 'right' if dir=='rtl' else 'left' }}: 20px;">
+          {% for sb in b.subs %}<li style="margin:6px 0;">{{ sb }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <ul style="font-size: 21px; color:#0f172a; margin:0; padding-{{ 'right' if dir=='rtl' else 'left' }}: 22px;">
+      {% for b in right %}
+      <li style="margin: 8px 0;">{{ b.text }}
+        {% if b.subs %}
+        <ul style="opacity:.95; font-size: 18px; margin: 8px 0; padding-{{ 'right' if dir=='rtl' else 'left' }}: 20px;">
+          {% for sb in b.subs %}<li style="margin:6px 0;">{{ sb }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
