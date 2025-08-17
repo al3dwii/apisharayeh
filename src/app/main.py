@@ -10,6 +10,11 @@ from app.core.metrics import MetricsMiddleware, metrics_app
 from app.api.v1 import agents, jobs, events, packs
 from app.api.v1 import services as services_api  # NEW: services endpoints
 
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
+
 from app.services.db import init_models
 from app.kernel.plugins.loader import (
     registry as plugin_registry,  # NEW: plugin registry
@@ -71,3 +76,14 @@ async def plugins_bootstrap():
         start_watcher()
 
 app.include_router(services_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],  # includes Authorization, Accept, etc.
+)

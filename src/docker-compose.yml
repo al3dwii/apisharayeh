@@ -48,7 +48,7 @@ services:
       PYTHONPATH: /srv
       PLUGINS_DIR: /srv/plugins
       MODELS_CONFIG: /srv/config/models.yaml
-      SERVICE_FLAGS: "*"
+      SERVICE_FLAGS: "public:*"   # ← enable all services for the "public" tenant
     volumes:
       # repo-root mounts (compose file is in ./src)
       - "../artifacts:${ARTIFACTS_DIR}"
@@ -75,6 +75,7 @@ services:
       PYTHONPATH: /srv
       PLUGINS_DIR: /srv/plugins
       MODELS_CONFIG: /srv/config/models.yaml
+      SERVICE_FLAGS: "public:*"   # ← worker sees same tenant service enablement
     volumes:
       - "../artifacts:${ARTIFACTS_DIR}"
       - "../plugins:/srv/plugins"
