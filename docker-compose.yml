@@ -53,6 +53,8 @@ services:
       RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN}
       RATE_LIMIT_TENANT_PER_MIN: ${RATE_LIMIT_TENANT_PER_MIN}
       PYTHONPATH: /srv
+      SERVICE_FLAGS: "public:echo.text,public:doc2deck.convert,public:office.word_to_pptx"
+      
     volumes:
       - ./artifacts:/srv/artifacts
     working_dir: /srv
@@ -80,7 +82,7 @@ services:
       PYTHONPATH: /srv
       PLUGINS_DIR: /srv/plugins
       MODELS_CONFIG: /srv/config/models.yaml
-      SERVICE_FLAGS: "*"
+      SERVICE_FLAGS: "public:echo.text,public:doc2deck.convert,public:office.word_to_pptx"
     volumes:
       - "./artifacts:${ARTIFACTS_DIR}"
       - "./plugins:/srv/plugins"
