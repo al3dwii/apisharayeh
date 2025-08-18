@@ -1,0 +1,50 @@
+id: office.pptx_to_docx
+name: PowerPoint to Word (Outline)
+version: 1.0.0
+runtime: inproc
+entrypoint: app.plugins.office_pptx_to_docx.impl:run
+
+inputs:
+  type: object
+  additionalProperties: false
+  required: [file_url]
+  properties:
+    file_url:
+      type: string
+      format: uri
+      description: "HTTP/HTTPS URL of the source PPTX"
+    include_notes:
+      type: boolean
+      default: false
+      description: "Append speaker notes under each slide"
+    include_images:
+      type: boolean
+      default: false
+      description: "Embed slide images under each slide title (scaled)"
+    max_slides:
+      type: integer
+      minimum: 1
+      maximum: 1000
+      default: 500
+      description: "Process at most this many slides"
+    heading_prefix:
+      type: string
+      default: "Slide"
+      description: "Prefix for slide headings, e.g., 'Slide' → 'Slide 1: ...'"
+
+outputs:
+  type: object
+  additionalProperties: false
+  properties:
+    docx_url:
+      type: string
+      format: uri
+    docx_key:
+      type: string
+
+permissions:
+  net_fetch: true
+  write_artifacts: true
+
+resources:
+  queue: cpu
