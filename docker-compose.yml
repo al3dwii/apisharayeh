@@ -16,79 +16,90 @@ services:
   redis:
     image: redis:7-alpine
 
-  migrate:
+  # Build image once here and reuse for api & worker
+  base:
     build:
       context: ./src
       dockerfile: Dockerfile
+    image: apisharayeh/app:dev
+    environment:
+      PYTHONPATH: /srv
+
+  migrate:
+    image: apisharayeh/app:dev
     depends_on:
       db:
         condition: service_healthy
     environment:
-      REDIS_URL: ${REDIS_URL}
-      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
-      DATABASE_URL: ${DATABASE_URL_SYNC}
-      ENV: ${ENV}
+      DATABASE_URL: ${DATABASE_URL_SYNC:-postgresql://postgres:postgres@db:5432/agentic}
+      ENV: ${ENV:-dev}
       PYTHONPATH: /srv
     working_dir: /srv
-    command: sh -lc "python -m alembic -c db/alembic.ini upgrade head"
+    command: >
+      sh -lc "python -m alembic -c db/alembic.ini upgrade head"
 
   api:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
+    image: apisharayeh/app:dev
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_started
     environment:
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
-      ARTIFACTS_DIR: /srv/artifacts
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
-      ENV: ${ENV}
-      APP_NAME: ${APP_NAME}
-      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET}
-      RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN}
-      RATE_LIMIT_TENANT_PER_MIN: ${RATE_LIMIT_TENANT_PER_MIN}
-      PYTHONPATH: /srv
-      SERVICE_FLAGS: "public:echo.text,public:doc2deck.convert,public:office.word_to_pptx"
-      
-    volumes:
-      - ./artifacts:/srv/artifacts
-    working_dir: /srv
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8080
-    expose:
-      - "8080"
-    restart: unless-stopped
-    ports:
-    - "8081:8080"
-
-  worker:
-    build:
-        context: ./src
-        dockerfile: Dockerfile
-    depends_on: [migrate, redis]
-    environment:
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
-      ARTIFACTS_DIR: ${ARTIFACTS_DIR}
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
-      ENV: ${ENV}
-      APP_NAME: ${APP_NAME}
-      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8081}
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/srv/artifacts}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/agentic}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE:-redis://redis:6379/1}
+      ENV: ${ENV:-dev}
+      APP_NAME: ${APP_NAME:-agentic-dev}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:-devsecret}
+      RATE_LIMIT_USER_PER_MIN: ${RATE_LIMIT_USER_PER_MIN:-300}
+      RATE_LIMIT_TENANT_PER_MIN: ${RATE_LIMIT_TENANT_PER_MIN:-5000}
       PYTHONPATH: /srv
       PLUGINS_DIR: /srv/plugins
       MODELS_CONFIG: /srv/config/models.yaml
-      SERVICE_FLAGS: "public:echo.text,public:doc2deck.convert,public:office.word_to_pptx"
+      SERVICE_FLAGS: ${SERVICE_FLAGS:-public:*}
+      SOFFICE_BIN: /usr/bin/soffice
     volumes:
-      - "./artifacts:${ARTIFACTS_DIR}"
-      - "./plugins:/srv/plugins"
-    command: celery -A app.workers.celery_app worker -Q cpu -c 2 --loglevel=INFO
+      - ./artifacts:/srv/artifacts
+      - ./plugins:/srv/plugins
+    working_dir: /srv
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    expose: ["8080"]
+    ports:
+      - "8081:8080"
     restart: unless-stopped
 
+  worker:
+    image: apisharayeh/app:dev
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8081}
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/srv/artifacts}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/agentic}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE:-redis://redis:6379/1}
+      ENV: ${ENV:-dev}
+      APP_NAME: ${APP_NAME:-agentic-dev}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:-devsecret}
+      PYTHONPATH: /srv
+      PLUGINS_DIR: /srv/plugins
+      MODELS_CONFIG: /srv/config/models.yaml
+      SERVICE_FLAGS: ${SERVICE_FLAGS:-public:*}
+      SOFFICE_BIN: /usr/bin/soffice
+    volumes:
+      - ./artifacts:/srv/artifacts
+      - ./plugins:/srv/plugins
+    working_dir: /srv
+    command: celery -A app.workers.celery_app worker -Q cpu -P solo -c 1 --loglevel=INFO
+    restart: unless-stopped
+
+  # Optional: keep if you want TLS & reverse-proxy
   caddy:
     image: caddy:2
     depends_on:
@@ -98,7 +109,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      ACME_EMAIL: ${ACME_EMAIL}
+      ACME_EMAIL: ${ACME_EMAIL:-you@example.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

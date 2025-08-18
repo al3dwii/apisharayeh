@@ -1,0 +1,33 @@
+# VCS
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Node/yarn (if any)
+node_modules/
+
+# Builds / local artifacts
+../artifacts/
+artifacts/
+dist/
+build/
+
+# OS
+.DS_Store
+
+# Tests (optional to skip in image)
+tests/
+
+# Other big stuff
+logs/

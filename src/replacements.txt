@@ -1,4 +1,19 @@
-# Replace any OpenAI-style key occurrences with a placeholder
+# OpenAI API keys
 regex:sk-[A-Za-z0-9_-]{20,}==>***REMOVED***
-# If your .env lines leaked, scrub them too
 regex:OPENAI_API_KEY\s*=\s*sk-[A-Za-z0-9_-]{20,}==>OPENAI_API_KEY=***REMOVED***
+
+# Anthropic keys
+regex:ANTHROPIC_API_KEY\s*=\s*sk-ant-[A-Za-z0-9_-]{20,}==>ANTHROPIC_API_KEY=***REMOVED***
+
+# Google API keys (simple heuristic)
+regex:GOOGLE_API_KEY\s*=\s*[A-Za-z0-9_\-]{30,}==>GOOGLE_API_KEY=***REMOVED***
+
+# AWS access keys
+regex:AWS_ACCESS_KEY_ID\s*=\s*AKIA[0-9A-Z]{16}==>AWS_ACCESS_KEY_ID=***REMOVED***
+regex:AWS_SECRET_ACCESS_KEY\s*=\s*[A-Za-z0-9/+=]{40}==>AWS_SECRET_ACCESS_KEY=***REMOVED***
+
+# HuggingFace
+regex:HF_API_TOKEN\s*=\s*hf_[A-Za-z0-9]{20,}==>HF_API_TOKEN=***REMOVED***
+
+# Generic .env leak fallback
+regex:([A-Z0-9_]{3,})\s*=\s*([^\n]{12,})==>$1=***REMOVED***
