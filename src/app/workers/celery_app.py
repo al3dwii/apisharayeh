@@ -1,23 +1,30 @@
 # /Users/omair/apisharayeh/src/app/workers/celery_app.py
+# ------------------------------------------------------------------------------
+# Celery worker (plugins-only)
+# - No legacy packs/agents imports or tasks
+# - Executes services using manifest snapshot stored on the Job row
+# - Emits start/end events; respects tenant RLS via GUC
+# - Optional fallback to in-memory registry if snapshot missing
+# - Includes deliver_webhook with exponential backoff
+# ------------------------------------------------------------------------------
+
+from __future__ import annotations
 
 import asyncio
-import inspect
 import traceback
 from typing import Any, Optional
 
 from celery import Celery
+from sqlalchemy import select, text
 
 from app.core.config import settings
-from app.packs.registry import resolve_agent  # ✅ direct resolver
-
-# Plugins runtime (NEW)
-from sqlalchemy import select, text
 from app.kernel.plugins.loader import registry as plugin_registry
+from app.kernel.plugins.spec import ServiceManifest
 from app.kernel.runtime import KernelContext, run_service
 from app.services.models import ModelRouter
 from app.services.tools import ToolRouter
-from app.kernel.plugins.spec import ServiceManifest
 
+# Celery configuration ---------------------------------------------------------
 
 celery = Celery("agentic")
 celery.conf.broker_url = settings.REDIS_URL_QUEUE
@@ -34,254 +41,149 @@ celery.conf.update(
     task_soft_time_limit=60 * 28,   # soft limit: 28 min
 )
 
+# Utilities --------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# run_agent_job (legacy packs/agents)
-# ---------------------------------------------------------------------------
-
-@celery.task(
-    name="run_agent_job",
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
-)
-def run_agent_job(
-    tenant_id: str,
-    pack: str,
-    agent: str,
-    payload: dict,
-    job_id: str,
-    webhook_url: Optional[str] = None,
-) -> None:
+class _EventsBridge:
     """
-    Celery entrypoint to execute a legacy agent job:
-      1) mark job running, emit started event
-      2) resolve/execute agent runner (sync/async)
-      3) persist success/failure, emit event, enqueue webhook
+    Bridge used by Kernel/DSL to emit events.
+    Normalizes various emit call shapes and forwards to async emit_event().
     """
-    from app.services.db import SessionLocal
-    from app.models.job import Job
-    from app.services.webhooks import enqueue_delivery
-    from app.services.events import emit_event
+    def __init__(self, tenant_id: str):
+        self.tenant_id = tenant_id
 
-    # optional redis for builders
-    try:
-        from app.memory.redis import get_redis
-        r = get_redis()
-    except Exception:
-        r = None  # non-fatal
+    def emit(self, *args, **kwargs) -> None:
+        """
+        Accepts:
+          emit(tenant_id, job_id, step, status, payload)
+          emit(job_id, step, payload)  # status 'info'
+          emit(job_id=..., step=..., status=..., payload=...)
+        """
+        from app.services.events import emit_event  # local import to avoid worker import cycles
 
-    async def _run() -> None:
-        # 0) Resolve agent builder -> runner
-        runner = None
-        error: Optional[str] = None
+        # Normalize arguments
+        if len(args) >= 5:
+            tenant_id, job_id, step, status, payload = args[:5]
+        elif len(args) == 4:
+            tenant_id, job_id, step, payload = args
+            status = kwargs.get("status", "info")
+        elif len(args) == 3:
+            job_id, step, payload = args
+            tenant_id = self.tenant_id
+            status = kwargs.get("status", "info")
+        else:
+            tenant_id = kwargs.get("tenant_id", self.tenant_id)
+            job_id = kwargs.get("job_id")
+            step = kwargs.get("step") or kwargs.get("event") or "event"
+            status = kwargs.get("status", "info")
+            payload = kwargs.get("payload", {})
+
+        # Fire-and-forget (run in loop if available, else run inline)
         try:
-            builder = resolve_agent(pack, agent)  # raises KeyError if unknown
-            runner = builder(r, tenant_id)        # builder(redis, tenant_id) -> runner
-        except KeyError as e:
-            error = str(e)
-        except Exception as e:
-            error = f"Failed to build agent runner: {e}"
-
-        # 1) Mark job running (idempotent: skip if already final)
-        async with SessionLocal() as session:
-            await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job or job.status in ("succeeded", "failed"):
-                return
-            job.status = "running"
-            await session.commit()
-
-        await emit_event(tenant_id, job_id, step="run", status="started", payload=None)
-
-        # 2) Execute runner
-        result: Any = None
-        if runner and error is None:
-            enriched = {**(payload or {}), "tenant_id": tenant_id, "job_id": job_id}
-            try:
-                if hasattr(runner, "arun"):
-                    result = await runner.arun(enriched)
-                elif hasattr(runner, "run"):
-                    maybe = runner.run(enriched)
-                    result = await maybe if inspect.isawaitable(maybe) else maybe
-                elif callable(runner):
-                    maybe = runner(enriched)
-                    result = await maybe if inspect.isawaitable(maybe) else maybe
-                else:
-                    error = "Agent runner type is not supported"
-            except Exception:
-                error = traceback.format_exc(limit=8)
-
-        # 3) Persist final state + events + optional webhook
-        async with SessionLocal() as session:
-            await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job:
-                return
-
-            if error:
-                job.status = "failed"
-                job.error = (error or "")[:4000]
-                await session.commit()
-                await emit_event(tenant_id, job_id, step="run", status="failed", payload={"error": job.error})
-                if webhook_url:
-                    await enqueue_delivery(
-                        tenant_id,
-                        job_id,
-                        webhook_url,
-                        "job.failed",
-                        {"job_id": job_id, "error": job.error},
-                    )
-            else:
-                job.status = "succeeded"
-                job.output_json = {"result": result}
-                await session.commit()
-                await emit_event(tenant_id, job_id, step="run", status="succeeded", payload={"result": result})
-                if webhook_url:
-                    await enqueue_delivery(
-                        tenant_id,
-                        job_id,
-                        webhook_url,
-                        "job.succeeded",
-                        {"job_id": job_id, "result": result},
-                    )
-
-    asyncio.run(_run())
+            asyncio.get_event_loop().create_task(
+                emit_event(tenant_id, job_id, step=step, status=status, payload=payload or {})
+            )
+        except RuntimeError:
+            asyncio.run(emit_event(tenant_id, job_id, step=step, status=status, payload=payload or {}))
 
 
-# ---------------------------------------------------------------------------
-# execute_service_job (NEW: plugins runtime) — backward compatible
-# ---------------------------------------------------------------------------
+# Tasks ------------------------------------------------------------------------
 
 @celery.task(
     name="execute_service_job",
-    autoretry_for=(),  # let caller decide retries
+    autoretry_for=(),  # don't auto-retry; caller decides
 )
-def execute_service_job(*args, **kwargs) -> None:
+def execute_service_job(job_id: str) -> None:
     """
-    Backward-compatible task entrypoint for plugin services.
-
-    Supports BOTH invocation shapes:
-      - New (simpler):   execute_service_job(job_id)
-      - Legacy (API):    execute_service_job(tenant_id, job_id, inputs, webhook_url=None)
-
-    The job row (manifest_snapshot, input_json, tenant_id) is the source of truth.
+    Execute a plugin service job by job_id.
+    Reads the Job row (tenant_id, manifest_snapshot, input_json), marks it running,
+    builds a KernelContext, runs the service, then persists result/error and emits events.
     """
-    # --- normalize job_id from args/kwargs ---
-    job_id: Optional[str] = None
-    if isinstance(kwargs.get("job_id"), str):
-        job_id = kwargs["job_id"]
-    elif len(args) == 1 and isinstance(args[0], str):
-        job_id = args[0]
-    elif len(args) >= 2 and isinstance(args[1], str):
-        job_id = args[1]
-
-    if not job_id:
-        raise ValueError(f"execute_service_job: couldn't extract job_id from args={args} kwargs={kwargs}")
-
     from app.services.db import SessionLocal
     from app.models.job import Job
     from app.services.events import emit_event
 
-    class _EventsBridge:
-        """Synchronous .emit called by DSL; forwards to async emit_event."""
-        def __init__(self, tenant_id: str):
-            self.tenant_id = tenant_id
-
-        def emit(self, *e_args, **e_kwargs):
-            """
-            Accept legacy (job_id, step, payload) and extended
-            (tenant_id, job_id, step, status, payload) forms.
-            """
-            # Normalize
-            if len(e_args) >= 5:
-                tenant_id, j_id, step, status, payload = e_args[:5]
-            elif len(e_args) == 4:
-                tenant_id, j_id, step, payload = e_args[:4]
-                status = e_kwargs.get("status", "info")
-            elif len(e_args) == 3:
-                j_id, step, payload = e_args
-                tenant_id = self.tenant_id
-                status = e_kwargs.get("status", "info")
-            else:
-                tenant_id = e_kwargs.get("tenant_id", self.tenant_id)
-                j_id = e_kwargs.get("job_id")
-                step = e_kwargs.get("step") or e_kwargs.get("event") or "event"
-                status = e_kwargs.get("status", "info")
-                payload = e_kwargs.get("payload", {})
-
-            try:
-                asyncio.get_event_loop().create_task(
-                    emit_event(tenant_id, j_id, step=step, status=status, payload=payload or {})
-                )
-            except RuntimeError:
-                asyncio.run(emit_event(tenant_id, j_id, step=step, status=status, payload=payload or {}))
-
     async def _run() -> None:
-        # 1) fetch job + manifest snapshot & mark running
+        # 1) Load job row (unscoped), get tenant_id, then set RLS GUC before further queries.
         async with SessionLocal() as session:
-            # NOTE: We need tenant_id from the row before we can set the RLS GUC.
             res = await session.execute(select(Job).where(Job.id == job_id))
             job = res.scalar_one_or_none()
             if not job:
                 return
-            tenant_id = job.tenant_id
 
+            tenant_id = job.tenant_id
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
+
+            # If already terminal, skip
             if job.status in ("succeeded", "failed"):
                 return
+
             job.status = "running"
             await session.commit()
 
         await emit_event(tenant_id, job_id, step="service.start", status="started", payload={"kind": job.kind})
 
-        # 2) reconstruct manifest + run
-        manifest = ServiceManifest.model_validate(job.manifest_snapshot or {}) if job.manifest_snapshot else None
+        # 2) Reconstruct manifest (prefer snapshot; fallback to registry for resilience)
+        manifest: Optional[ServiceManifest]
+        if job.manifest_snapshot:
+            try:
+                manifest = ServiceManifest.model_validate(job.manifest_snapshot)
+            except Exception:
+                manifest = None
+        else:
+            manifest = None
+
         if manifest is None and job.service_id:
-            # Fallback to current registry (less ideal for determinism, but OK)
+            # Fallback isn't strictly deterministic, but better than failing if snapshot is absent
             manifest = plugin_registry.get(job.service_id)
 
+        if manifest is None:
+            err_txt = "Missing service manifest (no snapshot and not in registry)"
+            # Persist failure
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
+                res = await session.execute(select(Job).where(Job.id == job_id))
+                j = res.scalar_one_or_none()
+                if j:
+                    j.status = "failed"
+                    j.error = err_txt
+                    await session.commit()
+            await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err_txt})
+            return
+
+        # 3) Build routers and context
         models = ModelRouter()
         tools = ToolRouter(models=models)
-
-        # IMPORTANT: KernelContext expects (tenant_id, job_id, events, artifacts, models, tools)
         ctx = KernelContext(tenant_id, job_id, _EventsBridge(tenant_id), None, models, tools)
 
-        outputs = None
-        err_txt = None
+        # 4) Run service (offload sync runner to thread)
+        outputs: Optional[dict[str, Any]] = None
+        err_txt: Optional[str] = None
         try:
-            # run_service is sync; offload to thread so we don't block the loop
             outputs = await asyncio.to_thread(run_service, manifest, job.input_json or {}, ctx)
         except Exception:
             err_txt = traceback.format_exc(limit=8)
 
-        # 3) persist final state
+        # 5) Persist final state + emit end event
         async with SessionLocal() as session:
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
             res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job:
+            j = res.scalar_one_or_none()
+            if not j:
                 return
 
             if err_txt:
-                job.status = "failed"
-                job.error = (err_txt or "")[:4000]
+                j.status = "failed"
+                j.error = (err_txt or "")[:4000]
                 await session.commit()
-                await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": job.error})
+                await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": j.error})
             else:
-                job.status = "succeeded"
-                job.output_json = outputs or {}
+                j.status = "succeeded"
+                j.output_json = outputs or {}
                 await session.commit()
                 await emit_event(tenant_id, job_id, step="service.end", status="succeeded", payload=outputs or {})
 
     asyncio.run(_run())
 
-
-# ---------------------------------------------------------------------------
-# deliver_webhook  (NOTE: requires enqueue to pass tenant_id)
-# ---------------------------------------------------------------------------
 
 @celery.task(
     name="deliver_webhook",
@@ -343,321 +245,3 @@ def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
         # exponential backoff with cap
         delay = min(600, (2 ** max(0, self.request.retries)) * 10)
         raise self.retry(exc=exc, countdown=delay)
-
-
-# import os
-# import json
-# import asyncio
-# import inspect
-# import traceback
-# from typing import Any, Optional
-
-# from celery import Celery
-
-# from app.core.config import settings
-# from app.packs.registry import resolve_agent  # ✅ direct resolver
-
-# celery = Celery("agentic")
-# celery.conf.broker_url = settings.REDIS_URL_QUEUE
-# celery.conf.result_backend = settings.REDIS_URL_QUEUE
-# celery.conf.update(
-#     task_serializer="json",
-#     accept_content=["json"],
-#     result_serializer="json",
-#     timezone="UTC",
-#     enable_utc=True,
-#     task_acks_late=True,            # safer with idempotent tasks
-#     worker_prefetch_multiplier=1,   # fair dispatch
-#     task_time_limit=60 * 30,        # hard limit: 30 min
-#     task_soft_time_limit=60 * 28,   # soft limit: 28 min
-# )
-
-# # ---------------------------------------------------------------------------
-# # run_agent_job
-# # ---------------------------------------------------------------------------
-
-# @celery.task(
-#     name="run_agent_job",
-#     autoretry_for=(Exception,),
-#     retry_backoff=True,
-#     retry_kwargs={"max_retries": 3},
-# )
-# def run_agent_job(
-#     tenant_id: str,
-#     pack: str,
-#     agent: str,
-#     payload: dict,
-#     job_id: str,
-#     webhook_url: Optional[str] = None,
-# ) -> None:
-#     """
-#     Celery entrypoint to execute an agent job:
-#       1) mark job running, emit started event
-#       2) resolve/execute agent runner (sync/async)
-#       3) persist success/failure, emit event, enqueue webhook
-#     """
-#     from sqlalchemy import select, text
-#     from app.services.db import SessionLocal
-#     from app.models.job import Job
-#     from app.services.webhooks import enqueue_delivery
-#     from app.services.events import emit_event
-#     from app.memory.redis import get_redis  # if your builders want redis
-
-#     async def _run() -> None:
-#         # 0) Resolve agent builder -> runner
-#         runner = None
-#         error: Optional[str] = None
-
-#         # Provide redis if your builders expect it
-#         try:
-#             r = get_redis()
-#         except Exception:
-#             r = None  # non-fatal
-
-#         try:
-#             builder = resolve_agent(pack, agent)  # ✅ raises KeyError if unknown
-#             runner = builder(r, tenant_id)        # builder(redis, tenant_id) -> runner
-#         except KeyError as e:
-#             error = str(e)
-#         except Exception as e:
-#             error = f"Failed to build agent runner: {e}"
-
-#         # 1) Mark job running (idempotent: skip if already final)
-#         async with SessionLocal() as session:
-#             # Set tenant GUC for RLS
-#             await session.execute(
-#                 text("SELECT set_config('app.tenant_id', :tid, true)"),
-#                 {"tid": tenant_id},
-#             )
-#             res = await session.execute(select(Job).where(Job.id == job_id))
-#             job = res.scalar_one_or_none()
-#             if not job:
-#                 # Nothing to do
-#                 return
-#             if job.status in ("succeeded", "failed"):
-#                 # Avoid double-processing due to retries
-#                 return
-
-#             job.status = "running"
-#             await session.commit()
-
-#         # Emit started event (persisted + pubsub)
-#         await emit_event(tenant_id, job_id, step="run", status="started", payload=None)
-
-#         # 2) Execute runner
-#         result: Any = None
-#         if runner and error is None:
-#             enriched = {**(payload or {}), "tenant_id": tenant_id, "job_id": job_id}
-#             try:
-#                 if hasattr(runner, "arun"):
-#                     result = await runner.arun(enriched)
-#                 elif hasattr(runner, "run"):
-#                     maybe = runner.run(enriched)
-#                     result = await maybe if inspect.isawaitable(maybe) else maybe
-#                 elif callable(runner):
-#                     maybe = runner(enriched)
-#                     result = await maybe if inspect.isawaitable(maybe) else maybe
-#                 else:
-#                     error = "Agent runner type is not supported"
-#             except Exception:
-#                 error = traceback.format_exc(limit=8)
-
-#         # 3) Persist final state + events + optional webhook
-#         async with SessionLocal() as session:
-#             await session.execute(
-#                 text("SELECT set_config('app.tenant_id', :tid, true)"),
-#                 {"tid": tenant_id},
-#             )
-#             res = await session.execute(select(Job).where(Job.id == job_id))
-#             job = res.scalar_one_or_none()
-#             if not job:
-#                 return
-
-#             if error:
-#                 job.status = "failed"
-#                 job.error = (error or "")[:4000]
-#                 await session.commit()
-#                 await emit_event(
-#                     tenant_id, job_id, step="run", status="failed", payload={"error": job.error}
-#                 )
-#                 if webhook_url:
-#                     await enqueue_delivery(
-#                         tenant_id,
-#                         job_id,
-#                         webhook_url,
-#                         "job.failed",
-#                         {"job_id": job_id, "error": job.error},
-#                     )
-#             else:
-#                 job.status = "succeeded"
-#                 job.output_json = {"result": result}
-#                 await session.commit()
-#                 await emit_event(
-#                     tenant_id, job_id, step="run", status="succeeded", payload={"result": result}
-#                 )
-#                 if webhook_url:
-#                     await enqueue_delivery(
-#                         tenant_id,
-#                         job_id,
-#                         webhook_url,
-#                         "job.succeeded",
-#                         {"job_id": job_id, "result": result},
-#                     )
-
-#     asyncio.run(_run())
-
-# # ---------------------------------------------------------------------------
-# # deliver_webhook  (NOTE: requires enqueue to pass tenant_id)
-# # ---------------------------------------------------------------------------
-
-# @celery.task(
-#     name="deliver_webhook",
-#     bind=True,
-#     max_retries=6,
-#     default_retry_delay=30,  # seconds; exponential backoff below
-# )
-# def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
-#     """
-#     Deliver a queued webhook using tenant-scoped RLS.
-#     IMPORTANT: enqueue must schedule with (tenant_id, delivery_id).
-#     """
-#     import httpx
-#     from sqlalchemy import select, text
-#     from app.services.db import SessionLocal
-#     from app.models.webhook_delivery import WebhookDelivery
-#     from app.services.webhooks import sign_payload
-
-#     async def _send() -> None:
-#         async with SessionLocal() as session:
-#             # Set tenant BEFORE first SELECT (RLS)
-#             await session.execute(
-#                 text("SELECT set_config('app.tenant_id', :tid, true)"),
-#                 {"tid": tenant_id},
-#             )
-
-#             res = await session.execute(
-#                 select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
-#             )
-#             d = res.scalar_one_or_none()
-#             if not d:
-#                 return
-
-#             payload = d.payload_json or {}
-#             sig = sign_payload(payload)
-
-#             try:
-#                 async with httpx.AsyncClient(timeout=20) as c:
-#                     r = await c.post(
-#                         d.url,
-#                         json=payload,
-#                         headers={
-#                             "X-Agentic-Event": d.event_type,
-#                             "X-Agentic-Signature": sig,
-#                             "Content-Type": "application/json",
-#                         },
-#                     )
-#                 if 200 <= r.status_code < 300:
-#                     d.status = "sent"
-#                     d.attempts += 1
-#                     d.last_error = None
-#                     await session.commit()
-#                     return
-#                 raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
-#             except Exception as e:
-#                 d.status = "retrying"
-#                 d.attempts += 1
-#                 d.last_error = str(e)[:1000]
-#                 await session.commit()
-#                 raise
-
-#     try:
-#         asyncio.run(_send())
-#     except Exception as exc:
-#         # exponential backoff with cap
-#         delay = min(600, (2 ** max(0, self.request.retries)) * 10)
-#         raise self.retry(exc=exc, countdown=delay)
-
-# ---------------------------------------------------------------------------
-# execute_service_job  — runs a plugin service (DSL or inproc)
-# ---------------------------------------------------------------------------
-@celery.task(
-    name="execute_service_job",
-    autoretry_for=(),  # don't auto-retry; let upstream decide
-)
-def execute_service_job(job_id: str) -> None:
-    import asyncio
-    from types import SimpleNamespace
-    from sqlalchemy import select, text
-    from app.services.db import SessionLocal
-    from app.models.job import Job
-    from app.services.events import emit_event
-    from app.kernel.plugins.spec import ServiceManifest
-    from app.kernel.runtime import KernelContext, run_service
-    from app.services.models import ModelRouter
-    from app.services.tools import ToolRouter
-
-    class _EventsBridge:
-        """Synchronous .emit called by DSL; forwards to async emit_event."""
-        def __init__(self, tenant_id: str):
-            self.tenant_id = tenant_id
-        def emit(self, job_id: str, step: str, payload: dict | None = None):
-            try:
-                asyncio.get_event_loop().create_task(
-                    emit_event(self.tenant_id, job_id, step=step, status="info", payload=payload or {})
-                )
-            except RuntimeError:
-                # no running loop (unlikely in Celery), run inline
-                asyncio.run(emit_event(self.tenant_id, job_id, step=step, status="info", payload=payload or {}))
-
-    async def _run() -> None:
-        # 1) fetch job + manifest snapshot
-        async with SessionLocal() as session:
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job:
-                return
-            tenant_id = job.tenant_id
-
-            # mark running
-            await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-            if job.status in ("succeeded", "failed"):
-                return
-            job.status = "running"
-            await session.commit()
-
-        await emit_event(tenant_id, job_id, step="service.start", status="started", payload={"kind": job.kind})
-
-        # 2) reconstruct manifest + run
-        manifest = ServiceManifest.model_validate(job.manifest_snapshot or {})
-        models = ModelRouter()
-        tools  = ToolRouter(models=models)
-        ctx    = KernelContext(job_id=job_id, events=_EventsBridge(tenant_id), artifacts=None, models=models, tools=tools)
-
-        outputs = None
-        err_txt = None
-        try:
-            # run_service is sync; offload to thread so we don't block the loop
-            outputs = await asyncio.to_thread(run_service, manifest, job.input_json or {}, ctx)
-        except Exception as e:
-            import traceback
-            err_txt = traceback.format_exc(limit=8)
-
-        # 3) persist final state
-        async with SessionLocal() as session:
-            await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job:
-                return
-            if err_txt:
-                job.status = "failed"
-                job.error = (err_txt or "")[:4000]
-                await session.commit()
-                await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": job.error})
-            else:
-                job.status = "succeeded"
-                job.output_json = outputs or {}
-                await session.commit()
-                await emit_event(tenant_id, job_id, step="service.end", status="succeeded", payload=outputs or {})
-
-    asyncio.run(_run())
