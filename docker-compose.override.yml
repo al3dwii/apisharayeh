@@ -1,8 +1,0 @@
-services:
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    working_dir: /srv/src
-    environment:
-      - PYTHONPATH=/srv/src:/srv
