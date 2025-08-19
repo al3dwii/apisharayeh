@@ -1,0 +1,60 @@
+id: slides.generate
+name: "Slides: Generate Presentation"
+version: "0.3.0"
+category: slides
+summary: "Create slides from a prompt or a Word (DOCX) file, render HTML, export PDF."
+engine:
+  min_kernel: "0.1.0"
+  dsl_version: "1"
+runtime: dsl
+entrypoint: ./flow.yaml
+
+modality: ["text","slides","file"]
+families: ["office","vision"]
+
+inputs:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  required: ["source","language"]
+  properties:
+    project_id: { type: string }
+    source: { type: string, enum: ["prompt","docx"] }
+    topic: { type: string }
+    docx_url: { type: string, format: "uri" }
+    language: { type: string, enum: ["ar","en"], default: "ar" }
+    slides_count: { type: integer, minimum: 3, maximum: 30, default: 12 }
+    theme: { type: string, default: "academic-ar" }
+    images_query_pack:
+      type: array
+      items: { type: string }
+
+outputs:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  properties:
+    outline: { type: array }
+    slides_html: { type: array, items: { type: string } }
+    pdf_url: { type: string }
+
+permissions:
+  fs_read: true
+  fs_write: true
+  exec_subprocess: false
+  call_models: false
+  net_fetch: false
+
+events:
+  todos:
+    - "تجهيز المحتوى"
+    - "تخطيط الهيكل"
+    - "إنشاء الشرائح"
+    - "مراجعة وتصدير"
+  timeline:
+    - { type: "thinking", text: "سأبدأ بتجهيز المحتوى ثم إنشاء المخطط." }
+    - { type: "tool", name: "Read" }
+    - { type: "tool", name: "Presentation", args: { action: "Insert slides" } }
+    - { type: "tool", name: "Presentation", args: { action: "Export PDF" } }
+
+artifacts:
+  - { key: "slides_html", type: "array", mime: "text/html", serve_from: "/artifacts/{project}/slides" }
+  - { key: "pdf_url", type: "string", mime: "application/pdf", serve_from: "/artifacts/{project}/export" }

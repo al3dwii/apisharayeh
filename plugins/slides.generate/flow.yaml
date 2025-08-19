@@ -1,0 +1,73 @@
+version: 1
+vars:
+  project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
+  slides_count: "{{ inputs.slides_count | default(12) }}"
+  queries: "{{ inputs.images_query_pack | default(['موضوع','أدوات','فوائد','تحديات']) }}"
+
+nodes:
+  - id: source_branch
+    op: switch
+    when:
+      "{{ inputs.source == 'prompt' }}":
+        op: slides.outline.from_prompt_stub
+        in:
+          topic: "{{ inputs.topic }}"
+          language: "{{ inputs.language }}"
+          count: "{{ vars.slides_count }}"
+        out:
+          outline: "@outline"
+      "{{ inputs.source == 'docx' }}":
+        op: sequence
+        do:
+          - op: io.fetch
+            in:
+              url: "{{ inputs.docx_url }}"
+              to_dir: "{{ vars.project_id }}/input"
+            out:
+              path: "@docx_path"
+          - op: doc.detect_type
+            in: { path: "@docx_path" }
+            out: { kind: "@kind" }
+          - op: doc.parse_docx
+            in: { path: "@docx_path" }
+            out: { text: "@text" }
+          - op: slides.outline.from_doc
+            in:
+              text: "@text"
+              language: "{{ inputs.language }}"
+              count: "{{ vars.slides_count }}"
+            out:
+              outline: "@outline"
+
+  - id: images
+    op: vision.images.from_fixtures
+    in:
+      queries: "{{ vars.queries }}"
+      project_id: "{{ vars.project_id }}"
+    out:
+      images: "@images"
+
+  - id: render
+    op: slides.html.render
+    needs: [source_branch, images]
+    in:
+      project_id: "{{ vars.project_id }}"
+      outline: "@outline"
+      theme: "{{ inputs.theme | default('academic-ar') }}"
+      images: "@images"
+    out:
+      slides_html: "@slides_html"
+
+  - id: export_pdf
+    op: slides.export.pdf
+    needs: [render]
+    in:
+      project_id: "{{ vars.project_id }}"
+      slides_html: "@slides_html"
+    out:
+      pdf_url: "@pdf_url"
+
+outputs:
+  outline: "@outline"
+  slides_html: "@slides_html"
+  pdf_url: "@pdf_url"
