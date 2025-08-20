@@ -1,57 +1,94 @@
+# src/app/server/plugins.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
-from app.kernel.manifest import load_plugin_snapshot
+from typing import Any, Dict, List, Set, Tuple, Optional
+import yaml
+import traceback
 
-def _iter_plugins(plugins_root: Path):
-    """Yield (dirpath, manifest, flow, perms) for all valid plugins."""
-    if not plugins_root.exists():
-        return
-    for sub in plugins_root.iterdir():
-        if not sub.is_dir():
-            continue
-        man = sub / "manifest.yaml"
-        flow = sub / "flow.yaml"
-        if not man.exists() or not flow.exists():
+def _load_yaml(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data or {}
+
+def _plugin_dirs(root: Path) -> List[Path]:
+    if not root.exists():
+        print(f"[plugins] PLUGINS_ROOT does not exist: {root}")
+        return []
+    return [p for p in sorted(root.iterdir()) if p.is_dir()]
+
+def list_plugins(root: Path) -> List[Dict[str, Any]]:
+    """
+    Enumerate plugins under root. Returns a short manifest list suitable for /v1/services.
+    Skips invalid plugins but logs the reason.
+    """
+    out: List[Dict[str, Any]] = []
+    for p in _plugin_dirs(root):
+        mf = p / "manifest.yaml"
+        if not mf.exists():
+            # Not a plugin folder
             continue
         try:
-            manifest, flow_doc, perms = load_plugin_snapshot(sub)
-        except Exception:
-            # Skip unreadable plugin folders
+            man = _load_yaml(mf)
+            sid = man.get("id")
+            entry = man.get("entrypoint")
+            runtime = man.get("runtime")
+            if not sid or not entry or not runtime:
+                print(f"[plugins] skip '{p.name}': missing id/entrypoint/runtime in manifest.yaml")
+                continue
+            out.append({
+                "id": sid,
+                "name": man.get("name", sid),
+                "version": man.get("version", "0.0.0"),
+                "category": man.get("category"),
+                "summary": man.get("summary", ""),
+                "runtime": runtime,
+                "entrypoint": entry,
+            })
+        except Exception as e:
+            print(f"[plugins] error loading {mf}: {e}")
+            traceback.print_exc()
+    if not out:
+        print(f"[plugins] No plugins discovered under {root}")
+    return out
+
+def get_plugin(root: Path, service_id: str) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Set[str]]:
+    """
+    Load a specific plugin by id. Returns (manifest, flow, permissions)
+    - For runtime=dsl, loads the YAML flow file at entrypoint.
+    - Raises FileNotFoundError if not found or invalid.
+    """
+    for p in _plugin_dirs(root):
+        mf = p / "manifest.yaml"
+        if not mf.exists():
             continue
-        yield sub, manifest, flow_doc, perms
+        try:
+            man = _load_yaml(mf)
+        except Exception as e:
+            print(f"[plugins] error parsing {mf}: {e}")
+            continue
 
-def list_plugins(plugins_root: Path) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    for sub, manifest, flow_doc, perms in _iter_plugins(plugins_root):
-        items.append({
-            "id": manifest.get("id") or sub.name,
-            "name": manifest.get("name") or sub.name,
-            "version": manifest.get("version") or "0.0.0",
-            "category": manifest.get("category"),
-            "summary": manifest.get("summary"),
-            "runtime": manifest.get("runtime"),
-            "entrypoint": manifest.get("entrypoint"),
-        })
-    return items
+        if man.get("id") != service_id:
+            continue
 
-def get_plugin(plugins_root: Path, service_id: str) -> Tuple[Dict[str, Any], Dict[str, Any], set]:
-    """
-    Robust lookup:
-    1) Try exact folder match: <PLUGINS_DIR>/<service_id>
-    2) Fallback: scan all plugins and match on manifest.id
-    """
-    # 1) direct folder
-    direct = plugins_root / service_id
-    try:
-        manifest, flow, perms = load_plugin_snapshot(direct)
-        return manifest, flow, perms
-    except Exception:
-        pass
+        entry = man.get("entrypoint")
+        runtime = man.get("runtime")
+        if not entry or not runtime:
+            raise FileNotFoundError(f"[plugins] Invalid manifest for {service_id}: missing runtime/entrypoint")
 
-    # 2) fallback by manifest.id (and subdir name normalization)
-    for sub, manifest, flow_doc, perms in _iter_plugins(plugins_root):
-        if manifest.get("id") == service_id or sub.name == service_id:
-            return manifest, flow_doc, perms
+        # Resolve entrypoint relative to the plugin dir
+        entry_path = (p / Path(entry)).resolve()
+        flow: Optional[Dict[str, Any]] = None
+        if runtime == "dsl":
+            if not entry_path.exists():
+                raise FileNotFoundError(f"[plugins] Entrypoint not found for {service_id}: {entry_path}")
+            try:
+                flow = _load_yaml(entry_path)
+            except Exception as e:
+                raise FileNotFoundError(f"[plugins] Could not parse flow at {entry_path}: {e}") from e
+
+        perms = set(man.get("permissions") or [])
+        # Attach plugin dir for debugging
+        man["_plugin_dir"] = str(p.resolve())
+        return man, flow, perms
 
     raise FileNotFoundError(f"Service not found: {service_id}")

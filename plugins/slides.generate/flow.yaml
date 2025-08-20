@@ -1,55 +1,113 @@
+# plugins/slides.generate/flow.yaml
 version: 1
+
 vars:
+  # Reuse the project_id we pass from the server (or generate one if missing)
   project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
+  # Default slide count if not provided
   slides_count: "{{ inputs.slides_count | default(12) }}"
+  # Placeholder image queries (Arabic-friendly)
   queries: "{{ inputs.images_query_pack | default(['موضوع','أدوات','فوائد','تحديات']) }}"
 
-nodes:
+steps:
+
+  # 1) Pick the outline source (DOCX vs. prompt), with guaranteed fallback to a stub outline
   - id: source_branch
-    op: switch
+    run: switch
     when:
-      "{{ inputs.source == 'prompt' }}":
-        op: slides.outline.from_prompt_stub
+
+      # ----- From DOCX -----
+      "inputs.source == 'docx'":
+        run: sequence
+        do:
+          - id: fetch_docx
+            run: io.fetch
+            in:
+              # Accepts absolute paths or file:// URLs
+              url: "{{ inputs.docx_url }}"
+              to_dir: "input"
+              filename: "source.docx"
+            out:
+              path: "@docx_path"
+
+          - id: detect_type
+            run: doc.detect_type
+            in:
+              path: "@docx_path"
+            out:
+              kind: "@doc_kind"
+
+          - id: parse_docx
+            run: doc.parse_docx
+            in:
+              path: "@docx_path"
+            out:
+              text: "@doc_text"
+
+          - id: outline_from_doc
+            run: slides.outline.from_doc
+            in:
+              text: "@doc_text"
+              language: "{{ inputs.language }}"
+              count: "{{ vars.slides_count }}"
+            out:
+              outline: "@outline"
+
+      # ----- From prompt -----
+      "inputs.source == 'prompt'":
+        run: slides.outline.from_prompt_stub
         in:
           topic: "{{ inputs.topic }}"
           language: "{{ inputs.language }}"
           count: "{{ vars.slides_count }}"
         out:
           outline: "@outline"
-      "{{ inputs.source == 'docx' }}":
-        op: sequence
-        do:
-          - op: io.fetch
-            in:
-              url: "{{ inputs.docx_url }}"
-              to_dir: "{{ vars.project_id }}/input"
-            out:
-              path: "@docx_path"
-          - op: doc.detect_type
-            in: { path: "@docx_path" }
-            out: { kind: "@kind" }
-          - op: doc.parse_docx
-            in: { path: "@docx_path" }
-            out: { text: "@text" }
-          - op: slides.outline.from_doc
-            in:
-              text: "@text"
-              language: "{{ inputs.language }}"
-              count: "{{ vars.slides_count }}"
-            out:
-              outline: "@outline"
 
-  - id: images
-    op: vision.images.from_fixtures
+      # ----- Fallback (anything else / empty) -----
+      "true":
+        run: slides.outline.from_prompt_stub
+        in:
+          topic: "{{ inputs.topic | default('عرض تقديمي تجريبي') }}"
+          language: "{{ inputs.language | default('ar') }}"
+          count: "{{ vars.slides_count }}"
+        out:
+          outline: "@outline"
+
+  # 2) Ensure we *have* an outline (last safety net)
+  - id: ensure_outline
+    run: switch
+    when:
+      "{{ not @outline }}":
+        run: slides.outline.from_prompt_stub
+        in:
+          topic: "عرض فارغ"
+          language: "{{ inputs.language | default('ar') }}"
+          count: "{{ vars.slides_count }}"
+        out:
+          outline: "@outline"
+      "true":
+        run: io.save_text
+        in:
+          text: "ok"
+          to_dir: "tmp"
+          filename: "noop.txt"
+        out:
+          path: "@noop"
+
+  # 3) (Optional) Generate placeholder images – deterministic/local
+  - id: get_images
+    run: vision.images.from_fixtures
+    needs: [ensure_outline]
     in:
-      queries: "{{ vars.queries }}"
       project_id: "{{ vars.project_id }}"
+      queries: "{{ vars.queries }}"
     out:
       images: "@images"
 
+  # 4) Render per-slide HTML
   - id: render
-    op: slides.html.render
-    needs: [source_branch, images]
+    run: slides.html.render
+    needs: [ensure_outline, get_images]
     in:
       project_id: "{{ vars.project_id }}"
       outline: "@outline"
@@ -58,8 +116,9 @@ nodes:
     out:
       slides_html: "@slides_html"
 
+  # 5) Export a stub PDF (always writes export/presentation.pdf)
   - id: export_pdf
-    op: slides.export.pdf
+    run: slides.export.pdf
     needs: [render]
     in:
       project_id: "{{ vars.project_id }}"

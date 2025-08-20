@@ -1,0 +1,10 @@
+INFO:     Started server process [11473]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:61658 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61660 - "GET /v1/services/slides.generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61662 - "POST /v1/uploads HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61666 - "POST /v1/services/slides.generate/jobs?validate=1 HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61668 - "GET /v1/jobs/job_43d31a30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61674 - "GET /v1/jobs/job_43d31a30/artifacts HTTP/1.1" 200 OK
