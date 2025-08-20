@@ -1,3 +1,4 @@
+# src/app/server/app.py
 from __future__ import annotations
 import asyncio
 import json
@@ -5,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,15 +40,18 @@ app.mount("/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifac
 job_store = JobStore()
 service_runner = ServiceRunner(PLUGINS_ROOT)
 
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "plugins_dir": str(PLUGINS_ROOT), "artifacts_dir": str(ARTIFACTS_DIR)}
+
 
 # ---------------- Services ----------------
 
 @app.get("/v1/services")
 def services_list():
     return {"services": list_plugins(PLUGINS_ROOT)}
+
 
 @app.get("/v1/services/{service_id}")
 def service_detail(service_id: str):
@@ -65,6 +69,7 @@ def service_detail(service_id: str):
         "permissions": list(perms),
     }
 
+
 @app.post("/v1/services/{service_id}/validate")
 def service_validate(service_id: str, body: Dict[str, Any] = Body(...)):
     inputs = (body.get("inputs") or {})
@@ -76,8 +81,49 @@ def service_validate(service_id: str, body: Dict[str, Any] = Body(...)):
     ok, errors = validate_inputs_against_schema(schema, inputs)
     return {"ok": ok, "errors": errors}
 
+
+# ---------------- Jobs (create/run) ----------------
+
+def _make_sync_emitter(loop: asyncio.AbstractEventLoop, job_store: JobStore, job_id: str):
+    """
+    Return a sync callable that:
+      - Translates runner 'status' events into JobStore.update_status(...)
+      - Appends every event to the JobStore event log
+
+    This is safe to call from worker threads (ServiceRunner/DSL) and marshals
+    work back to the main loop via run_coroutine_threadsafe.
+    """
+    def emit(event_type: str, payload: Dict[str, Any]):
+        try:
+            data = payload or {}
+
+            # If the runner emits a status event, mirror it into the JobStore.status
+            if event_type == "status":
+                state = data.get("state")
+                err = data.get("error")
+                if state in {"queued", "running", "succeeded", "failed"}:
+                    asyncio.run_coroutine_threadsafe(
+                        job_store.update_status(job_id, state, err),
+                        loop,
+                    )
+
+            # Always append the event for SSE consumers
+            asyncio.run_coroutine_threadsafe(
+                job_store.append_event(job_id, event_type, data),
+                loop,
+            )
+        except Exception as e:
+            # Non-fatal; never crash a worker thread on logging failures
+            print(f"[events] failed to schedule emit {event_type}: {e}")
+    return emit
+
+
 @app.post("/v1/services/{service_id}/jobs", status_code=201)
-async def service_start(service_id: str, body: Dict[str, Any] = Body(...), validate: bool = True):
+async def service_start(
+    service_id: str,
+    body: Dict[str, Any] = Body(...),
+    validate: bool = Query(True),
+):
     inputs = (body.get("inputs") or {})
 
     # Preflight validation (on by default)
@@ -111,19 +157,22 @@ async def service_start(service_id: str, body: Dict[str, Any] = Body(...), valid
     project_id = inputs.get("project_id") or f"prj_{uuid.uuid4().hex[:8]}"
     inputs["project_id"] = project_id
 
-    # Persist a job record
+    # Persist a job record (JobStore likely defaults to status='queued')
     await job_store.create(job_id, service_id, project_id, inputs)
 
-    loop = asyncio.get_running_loop()
+    # Immediately mark as 'running' so pollers don't get stuck on 'queued'
+    await job_store.update_status(job_id, "running")
 
-    async def on_event(event_type: str, payload: Dict[str, Any]):
-        await job_store.append_event(job_id, event_type, payload)
+    loop = asyncio.get_running_loop()
+    on_event_sync = _make_sync_emitter(loop, job_store, job_id)
 
     async def run_job():
         try:
-            # Run DSL/service in a worker thread; event emitter posts back to this loop
-            outputs = await asyncio.to_thread(service_runner.run, service_id, inputs, on_event, loop)
+            # Run DSL/service in a worker thread; it will call on_event_sync (sync) from that thread.
+            outputs = await asyncio.to_thread(service_runner.run, service_id, inputs, on_event_sync)
             await job_store.set_outputs(job_id, outputs)
+            # Ensure terminal state is reflected even if the flow didn't emit a final status
+            await job_store.update_status(job_id, "succeeded")
         except ProblemDetails as e:
             await job_store.update_status(job_id, "failed", e.to_dict())
         except Exception as e:
@@ -139,7 +188,8 @@ async def service_start(service_id: str, body: Dict[str, Any] = Body(...), valid
         "watch": f"/v1/jobs/{job_id}/events",
     }
 
-# ---------------- Jobs ----------------
+
+# ---------------- Jobs (status/events) ----------------
 
 @app.get("/v1/jobs/{job_id}")
 def job_status(job_id: str):
@@ -157,6 +207,7 @@ def job_status(job_id: str):
         "error": rec.error,
     }
 
+
 @app.get("/v1/jobs/{job_id}/events")
 async def job_events(job_id: str):
     rec = job_store.get(job_id)
@@ -166,10 +217,10 @@ async def job_events(job_id: str):
     queue = await job_store.subscribe(job_id)
 
     async def event_stream():
-        # Replay existing events first
+        # Replay historical events first
         for evt in list(rec.events):
             yield _format_sse(evt)
-        # Then stream new events
+        # Then stream new ones
         try:
             while True:
                 evt = await queue.get()
@@ -181,11 +232,13 @@ async def job_events(job_id: str):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+
 # ---------------- Artifacts ----------------
 
 @app.get("/v1/projects/{project_id}/artifacts")
 def project_artifacts(project_id: str):
     return list_project_artifacts(ARTIFACTS_DIR, project_id)
+
 
 @app.get("/v1/jobs/{job_id}/artifacts")
 def job_artifacts(job_id: str):
@@ -193,6 +246,7 @@ def job_artifacts(job_id: str):
     if not rec:
         raise HTTPException(status_code=404, detail="Job not found")
     return list_project_artifacts(ARTIFACTS_DIR, rec.project_id)
+
 
 # ---------------- Uploads ----------------
 
@@ -207,8 +261,9 @@ async def upload_file(file: UploadFile = File(...), project_id: Optional[str] = 
         return info
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Upload failed")
+
 
 # ---------------- SSE formatting ----------------
 

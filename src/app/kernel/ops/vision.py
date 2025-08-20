@@ -1,62 +1,78 @@
+# src/app/kernel/ops/vision.py
 from __future__ import annotations
-import base64
+import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Iterable
+
 from ..errors import ProblemDetails
 
-REQUIRED_PERMS = {"fs_write"}
+# Minimal valid 1x1 transparent PNG (binary)
+_ONE_BY_ONE_PNG = bytes([
+    0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
+    0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x06,0x00,0x00,0x00,0x1F,0x15,0xC4,
+    0x89,0x00,0x00,0x00,0x0A,0x49,0x44,0x41,0x54,0x78,0x9C,0x63,0xF8,0xCF,0x00,0x00,
+    0x02,0x0B,0x01,0x02,0xA7,0x69,0x1D,0xD7,0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,
+    0xAE,0x42,0x60,0x82
+])
 
-# A tiny 1x1 PNG (transparent) to use as placeholder if no fixture images are found.
-_PNG_1x1 = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
-    "AAC0lEQVR42mP8/58HAAMBAQAY4mT7AAAAAElFTkSuQmCC"
-)
+REQUIRED_PERMS = {"fs_write", "fs_read"}
 
-def from_fixtures(ctx, queries: List[str], project_id: str) -> Dict[str, Any]:
+
+def _ensure_placeholders(ctx, count: int, project_id: str) -> List[str]:
     """
-    Copy a couple of images per query from local fixtures (if available) into
-    /artifacts/{project}/images and return a flat list of file paths.
+    Create N placeholder PNGs under this project's artifacts/images.
+    Returns absolute paths.
     """
     if "fs_write" not in ctx.permissions:
         raise ProblemDetails(title="Permission denied", detail="fs_write is required", code="E_PERM", status=403)
 
-    # Try to find plugin fixtures by convention (optional)
-    candidates = [
-        Path("./plugins/slides.generate/fixtures/assets"),
-        Path("./src/app/plugins/slides.generate/fixtures/assets"),
-        Path("./plugins/slides.generate/fixtures"),
-    ]
-    fixtures_dir = next((p for p in candidates if p.exists()), None)
+    out_dir = ctx.artifacts_dir("images")  # e.g., /.../artifacts/prj_xxx/images
+    paths: List[str] = []
+    for i in range(1, count + 1):
+        name = f"placeholder_{i}.png"
+        p = out_dir / name
+        if not p.exists():
+            ctx.write_bytes(f"images/{name}", _ONE_BY_ONE_PNG)
+        paths.append(str(p))
+    return paths
 
-    out_dir = ctx.artifacts_dir("images")
-    results: List[str] = []
 
-    if fixtures_dir and fixtures_dir.exists():
-        imgs = [p for p in fixtures_dir.glob("*.png")] + [p for p in fixtures_dir.glob("*.jpg")] + [p for p in fixtures_dir.glob("*.jpeg")]
-        # If nothing in fixtures, fall back to placeholders
-        if not imgs:
-            for i in range(max(3, len(queries))):
-                ph = out_dir / f"placeholder_{i+1}.png"
-                if not ph.exists():
-                    ph.write_bytes(_PNG_1x1)
-                results.append(str(ph))
-        else:
-            # Copy up to N images
-            take = max(3, min(10, len(imgs)))
-            for i, img in enumerate(imgs[:take], start=1):
-                dest = out_dir / img.name
-                if not dest.exists():
-                    dest.write_bytes(img.read_bytes())
-                results.append(str(dest))
-    else:
-        # No fixtures dir—produce placeholders
-        for i in range(max(3, len(queries))):
-            ph = out_dir / f"placeholder_{i+1}.png"
-            if not ph.exists():
-                ph.write_bytes(_PNG_1x1)
-            results.append(str(ph))
+def images_from_fixtures(ctx, queries: Iterable[str] | None = None, project_id: str | None = None) -> Dict[str, Any]:
+    """
+    DEV stub that returns a batch of local placeholder images.
+    - queries: list of thematic categories (unused, kept for signature compatibility)
+    - project_id: used only to place images under the correct artifacts folder
+    """
+    # Default values so flow YAML can omit them safely
+    queries = list(queries or ["موضوع", "أدوات", "فوائد", "تحديات"])
+    project_id = project_id or ctx.project_id
 
-    ctx.emit("tool_used", {"name": "vision.images.from_fixtures", "args": {"count": len(results)}})
-    return {"images": results}
+    # Heuristic: enough images to cover most decks (37 as you saw earlier)
+    total = max(12, min(64, len(queries) * 9 + 1))  # typically 37 for 4 queries
+    paths = _ensure_placeholders(ctx, total, project_id)
 
+    # Emit a tool_used event for tracing
+    ctx.emit("tool_used", {
+        "name": "vision.images.from_fixtures",
+        "args": {"queries": str(queries), "project_id": project_id, "count": len(paths)}
+    })
+
+    return {"images": paths}
+
+
+# ---- Compatibility exports ---------------------------------------------------
+# Some routers try: getattr(module, "from_fixtures")
+def from_fixtures(ctx, queries=None, project_id: str | None = None) -> Dict[str, Any]:
+    return images_from_fixtures(ctx, queries=queries, project_id=project_id)
+
+# Some routers try chained: getattr(module, "images").from_fixtures
+class images:  # noqa: N801 (exposed as 'vision.images')
+    @staticmethod
+    def from_fixtures(ctx, queries=None, project_id: str | None = None) -> Dict[str, Any]:
+        return images_from_fixtures(ctx, queries=queries, project_id=project_id)
+
+
+# Permission annotations (used by ToolRouter, if present)
+images_from_fixtures.required_permissions = REQUIRED_PERMS
 from_fixtures.required_permissions = REQUIRED_PERMS
+images.from_fixtures.required_permissions = REQUIRED_PERMS
