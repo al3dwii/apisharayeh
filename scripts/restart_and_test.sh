@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # --- Config / Args -----------------------------------------------------------
-DOCX_PATH_ARG="${1:-}"           # pass absolute path to your .docx as the first arg
+DOCX_PATH_ARG="${1:-}"            # pass absolute path to your .docx as the first arg
 OPEN_BROWSER="${OPEN_BROWSER:-0}" # set to 1 to auto-open the PDF/first slide
+KEEP_SERVER="${KEEP_SERVER:-0}"   # set to 1 to leave the server running after the script
 PORT="${PORT:-8000}"
 HOST="http://localhost:${PORT}"
 
@@ -32,6 +33,14 @@ if [[ ! -f "${DOCX_PATH_ARG}" ]]; then
   exit 2
 fi
 
+# Normalize the file path (handles relative paths safely)
+DOCX_PATH_ABS="$(python - "$DOCX_PATH_ARG" <<'PY'
+import os, sys
+p = sys.argv[1]
+print(os.path.abspath(p))
+PY
+)"
+
 # --- Environment for server --------------------------------------------------
 export DEV_OFFLINE=true
 export PLUGINS_DIR="${ROOT_DIR}/plugins"
@@ -51,17 +60,34 @@ if lsof -ti tcp:"${PORT}" >/dev/null; then
 fi
 # also kill old run_server processes (best-effort)
 pkill -f "python -m src.run_server" 2>/dev/null || true
-sleep 1
+sleep 0.5
 
 # --- Start server ------------------------------------------------------------
 echo "Starting server…"
 nohup python -m src.run_server > "logs/server.out" 2>&1 & echo $! > "logs/server.pid"
-SRV_PID="$(cat logs/server.pid)"
-echo "Server PID: ${SRV_PID}"
+SRV_PID="$(cat logs/server.pid || true)"
+echo "Server PID: ${SRV_PID:-<unknown>}"
+
+# Ensure we kill the server on exit, unless KEEP_SERVER=1
+cleanup() {
+  if [[ "${KEEP_SERVER}" == "1" ]]; then
+    echo "Leaving server running (KEEP_SERVER=1)."
+    return
+  fi
+  if [[ -n "${SRV_PID:-}" ]] && ps -p "${SRV_PID}" >/dev/null 2>&1; then
+    echo "Stopping server PID ${SRV_PID}…"
+    kill "${SRV_PID}" >/dev/null 2>&1 || true
+    sleep 0.3
+    if ps -p "${SRV_PID}" >/dev/null 2>&1; then
+      kill -9 "${SRV_PID}" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+trap cleanup EXIT
 
 # --- Wait for /healthz -------------------------------------------------------
 echo -n "Waiting for /healthz "
-ATTEMPTS=60
+ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
 until curl -fsS "${HOST}/healthz" >/dev/null 2>&1; do
   ((ATTEMPTS--)) || { echo; echo "Server didn't become healthy. Tail logs/server.out"; tail -n 200 logs/server.out; exit 1; }
   echo -n "."
@@ -80,8 +106,8 @@ fi
 echo "slides.generate is available."
 
 # --- Upload DOCX -------------------------------------------------------------
-echo "Uploading DOCX: ${DOCX_PATH_ARG}"
-UPLOAD_JSON="$(curl -fsS -F "file=@${DOCX_PATH_ARG}" "${HOST}/v1/uploads")"
+echo "Uploading DOCX: ${DOCX_PATH_ABS}"
+UPLOAD_JSON="$(curl -fsS -F "file=@${DOCX_PATH_ABS}" "${HOST}/v1/uploads")"
 echo "${UPLOAD_JSON}" | jq .
 PRJ="$(echo "${UPLOAD_JSON}"     | jq -r .project_id)"
 DOCX_ABS_PATH="$(echo "${UPLOAD_JSON}" | jq -r .path)"
@@ -92,19 +118,21 @@ if [[ -z "${PRJ}" || -z "${DOCX_ABS_PATH}" || "${PRJ}" == "null" || "${DOCX_ABS_
   exit 1
 fi
 
-# --- Kick off job ------------------------------------------------------------
+# --- Kick off job (build JSON via jq for safe escaping) ----------------------
 echo "Starting slides.generate job for project ${PRJ}…"
+JOB_BODY="$(jq -n --arg prj "${PRJ}" --arg path "${DOCX_ABS_PATH}" '
+  {inputs:{
+    source:"docx",
+    docx_url:$path,
+    language:"ar",
+    slides_count:12,
+    project_id:$prj
+  }}')"
+
 JOB_JSON="$(curl -fsS -X POST "${HOST}/v1/services/slides.generate/jobs?validate=1" \
   -H "Content-Type: application/json" \
-  -d "{
-        \"inputs\":{
-          \"source\":\"docx\",
-          \"docx_url\":\"${DOCX_ABS_PATH}\",
-          \"language\":\"ar\",
-          \"slides_count\":12,
-          \"project_id\":\"${PRJ}\"
-        }
-      }")"
+  -d "${JOB_BODY}")"
+
 echo "${JOB_JSON}" | jq .
 JOB_ID="$(echo "${JOB_JSON}" | jq -r .job_id)"
 if [[ -z "${JOB_ID}" || "${JOB_ID}" == "null" ]]; then
@@ -114,7 +142,7 @@ fi
 
 # --- Wait for job to complete ------------------------------------------------
 echo -n "Waiting for job ${JOB_ID} to finish "
-ATTEMPTS=180
+ATTEMPTS="${JOB_ATTEMPTS:-180}"
 STATUS="running"
 while [[ "${STATUS}" == "running" || "${STATUS}" == "queued" ]]; do
   ((ATTEMPTS--)) || { echo; echo "Timed out waiting for job. Current:"; curl -fsS "${HOST}/v1/jobs/${JOB_ID}" | jq .; echo; echo "Server logs:"; tail -n 200 logs/server.out; exit 1; }
@@ -151,14 +179,18 @@ fi
 
 # --- Optionally open in browser ---------------------------------------------
 if [[ "${OPEN_BROWSER}" == "1" ]]; then
-  if [[ -n "${PDF_URL}" && "${PDF_URL}" != "null" ]]; then
-    open "${HOST}${PDF_URL}" || true
+  if command -v open >/dev/null 2>&1; then
+    OPENER="open"        # macOS
+  elif command -v xdg-open >/dev/null 2>&1; then
+    OPENER="xdg-open"    # Linux
+  else
+    OPENER=""
   fi
-  if [[ -n "${FIRST_SLIDE_URL}" && "${FIRST_SLIDE_URL}" != "null" ]]; then
-    open "${HOST}${FIRST_SLIDE_URL}" || true
+  if [[ -n "${OPENER}" ]]; then
+    [[ -n "${PDF_URL}" && "${PDF_URL}" != "null" ]] && "${OPENER}" "${HOST}${PDF_URL}" || true
+    [[ -n "${FIRST_SLIDE_URL}" && "${FIRST_SLIDE_URL}" != "null" ]] && "${OPENER}" "${HOST}${FIRST_SLIDE_URL}" || true
   fi
 fi
 
 echo
 echo "Done. 🎉"
-

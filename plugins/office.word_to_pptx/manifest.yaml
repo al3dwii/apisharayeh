@@ -1,17 +1,24 @@
 id: office.word_to_pptx
-name: Word to PowerPoint
-version: 1.0.0
+name: "Office: Word → PPTX"
+version: "0.1.0"
+summary: "Convert a DOCX into a PPTX (stub for tests)."
+
 runtime: dsl
+entrypoint: flow.yaml
+
+permissions:
+  fs_read: true
+  fs_write: true
+
 inputs:
   type: object
-  required: [file_url, title]
   properties:
-    file_url: { type: string, format: uri }
-    title:    { type: string }
-    max_slides: { type: integer, minimum: 1, default: 12 }
+    docx_url:
+      type: string
+      description: "Absolute path or file:// URL to a .docx file."
+  required: ["docx_url"]
+
 outputs:
-  type: object
-  properties:
-    pptx_url: { type: string, format: uri }
-resources: { queue: cpu }
-permissions: { net_fetch: true, write_artifacts: true }
+  pptx_path:
+    type: string
+    description: "Artifact path to the generated PPTX."

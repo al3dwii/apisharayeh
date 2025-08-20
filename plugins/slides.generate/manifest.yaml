@@ -1,55 +1,51 @@
 id: slides.generate
-name: "Slides: Generate Presentation"   # <-- quoted to allow the colon
-version: "0.3.1"
-category: slides
-summary: "Create slides from a prompt or a Word (DOCX/TXT) file, render HTML, export PDF."
-runtime: dsl
-entrypoint: ./flow.yaml
+name: "Slides: Generate"
+version: "0.1.0"
+summary: "Generate HTML slides and a PDF from a DOCX or a prompt."
 
+# schema expects these as strings
+runtime: dsl
+entrypoint: flow.yaml
+
+# schema expects a mapping[str, bool]
 permissions:
-  - fs_read
-  - fs_write
+  fs_read: true
+  fs_write: true
 
 inputs:
-  $schema: "https://json-schema.org/draft/2020-12/schema"
   type: object
-  required: [source, language]
   properties:
-    project_id:
-      type: string
-      description: "Optional project id to co-locate artifacts."
+    project_id: { type: string }
     source:
       type: string
-      enum: [prompt, docx]
-    topic:
-      type: string
-      description: "Topic/title when source=prompt."
-    docx_url:
-      type: string
-      description: |
-        Local path, file:// URL, or /artifacts/... URL for the document.
+      enum: ["docx", "prompt"]
+    docx_url: { type: string }
+    topic: { type: string }
     language:
       type: string
-      enum: [ar, en]
-      default: ar
+      default: "ar"
     slides_count:
       type: integer
-      minimum: 3
-      maximum: 30
+      minimum: 1
+      maximum: 50
       default: 12
     theme:
       type: string
-      default: academic-ar
+      default: "academic-ar"
     images_query_pack:
       type: array
       items: { type: string }
+  required: []
 
-  allOf:
-    - if:
-        properties: { source: { const: prompt } }
-      then:
-        required: [topic]
-    - if:
-        properties: { source: { const: docx } }
-      then:
-        required: [docx_url]
+outputs:
+  outline:
+    type: array
+    items: { type: string }
+  slides_html:
+    type: array
+    items: { type: string }
+  pdf_url:
+    type: string
+
+events:
+  todos: []
