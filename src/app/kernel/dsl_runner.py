@@ -1,3 +1,4 @@
+# src/app/kernel/dsl_runner.py
 from __future__ import annotations
 import re
 import uuid
@@ -8,25 +9,37 @@ from .errors import ProblemDetails
 # Patterns
 _REF_RE = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)$")          # whole-string @ref
 _MUSTACHE_RE = re.compile(r"\{\{\s*(.*?)\s*\}\}")              # {{ expr }}
-_AT_IN_EXPR_RE = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")      # @ref inside expr (rough)
+_AT_IN_EXPR_RE = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")      # @ref inside expr
 
 # ---------- helpers ----------
 
 def _random_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex[:8]}"
 
-def _truthy(v: Any) -> bool:
-    return not (v is None or v is False or v == "" or v == 0)
-
+@dataclass
 class _Dot:
-    """
-    Small wrapper to allow attribute access (obj.key) over dicts/lists recursively.
-    Missing keys return None.
-    """
-    __slots__ = ("_v",)
+    _v: Any = field(default_factory=dict)
 
-    def __init__(self, v: Any):
-        self._v = v
+    def __iter__(self):
+        v = self._v
+        if isinstance(v, (list, tuple)):
+            return iter(v)
+        if isinstance(v, dict):
+            return iter(v.items())
+        return iter(())
+
+    def __len__(self):
+        v = self._v
+        try:
+            return len(v)
+        except Exception:
+            return 0
+
+    def __bool__(self):
+        return bool(self._v)
+
+    def __repr__(self):
+        return f"_Dot({self._v!r})"
 
     def __getattr__(self, name: str) -> Any:
         v = self._v
@@ -42,18 +55,6 @@ class _Dot:
             except Exception:
                 return None
         return None
-
-    def __iter__(self):
-        v = self._v
-        if isinstance(v, (list, tuple)):
-            for x in v:
-                yield _dot(x)
-        elif isinstance(v, dict):
-            for k in v:
-                yield k
-
-    def __repr__(self):
-        return f"_Dot({self._v!r})"
 
 def _dot(v: Any) -> Any:
     if isinstance(v, dict):
@@ -72,50 +73,60 @@ class EvalContext:
     helpers: Dict[str, Callable[..., Any]]
 
 def _safe_eval(expr: str, ev: EvalContext) -> Any:
+    """
+    Evaluate a tiny Python expression with a very small, safe environment.
+    Supports @name references by rewriting to __ref("name").
+    """
     # Replace @name with __ref("name")
-    expr2 = _AT_IN_EXPR_RE.sub(r'__ref("\1")', expr)
+    expr2 = _AT_IN_EXPR_RE.sub(r'__ref("\1")', (expr or ""))
 
     def __ref(name: str) -> Any:
         return ev.scope.get(name)
 
+    # Note: provide lowercase aliases ('true', 'false', 'null', 'none', 'yes', 'no')
     env = {
         "__builtins__": {},
-        # Wrap dicts so `inputs.project_id` works
+
+        # Data (wrapped so attribute-style access works: inputs.project_id, etc.)
         "inputs": _dot(ev.inputs),
         "vars": _dot(ev.vars),
-        "env": {},
-        "random_id": _random_id,
-        "url": ev.helpers.get("url", lambda x: x),
-        "__ref": __ref,
-        "len": len,
-        "int": int,
-        "str": str,
-        "bool": bool,
+        "scope": _dot(ev.scope),
+        "h": ev.helpers,
+
+        # Constants
         "True": True,
         "False": False,
         "None": None,
+        "true": True,
+        "false": False,
+        "null": None,
+        "none": None,
+        "yes": True,
+        "no": False,
+
+        # Helpers
+        "random_id": _random_id,
+        "__ref": __ref,
     }
-    try:
-        return eval(expr2, env, {})
-    except Exception as e:
-        raise ProblemDetails(
-            title="DSL eval error",
-            detail=f"expr={expr!r} -> {e}",
-            code="E_DSL_EVAL",
-            status=400,
-        )
+    return eval(expr2, {"__builtins__": {}}, env)
 
 def _apply_filters(value: Any, filters: List[str], ev: EvalContext) -> Any:
     for f in filters:
         f = f.strip()
         if not f:
             continue
-        if f.startswith("default(") and f.endswith(")"):
-            arg_expr = f[len("default("):-1].strip()
-            if value is None or (isinstance(value, str) and value == ""):
-                value = _safe_eval(arg_expr, ev)
+        name, arg = (f.split("(", 1) + [""])[:2]
+        name = name.strip()
+        arg = arg.rstrip(")") if arg else ""
+        if name == "default":
+            try:
+                alt = _safe_eval(arg, ev) if arg else ""
+            except Exception:
+                alt = ""
+            if not value:
+                value = alt
         else:
-            # Unknown filter ignored
+            # Unknown filters are ignored (no-op)
             pass
     return value
 
@@ -133,9 +144,12 @@ def _eval_mustache(expr: str, ev: EvalContext) -> Any:
 def interpolate(value: Any, ev: EvalContext) -> Any:
     try:
         if isinstance(value, str):
+            # Whole-string @ref → return the referenced value (not a string)
             m = _REF_RE.match(value)
             if m:
                 return ev.scope.get(m.group(1))
+
+            # Mustache replacement
             if "{{" in value and "}}" in value:
                 def repl(match):
                     inner = match.group(1)
@@ -143,6 +157,7 @@ def interpolate(value: Any, ev: EvalContext) -> Any:
                     return "" if res is None else str(res)
                 return _MUSTACHE_RE.sub(repl, value)
             return value
+
         if isinstance(value, list):
             return [interpolate(v, ev) for v in value]
         if isinstance(value, dict):
@@ -152,18 +167,18 @@ def interpolate(value: Any, ev: EvalContext) -> Any:
         raise
     except Exception as e:
         raise ProblemDetails(
-            title="DSL interpolate error",
+            title="Interpolation error",
             detail=str(e),
-            code="E_DSL_INTERP",
+            code="E_INTERP",
             status=400,
         )
 
-# ---------- Runner ----------
+# ---------- runner ----------
 
 @dataclass
 class NodeResult:
     id: str
-    outputs: Dict[str, Any] = field(default_factory=dict)
+    outputs: Dict[str, Any]
 
 class DSLRunner:
     def __init__(self, toolrouter, ctx):
@@ -180,8 +195,8 @@ class DSLRunner:
         return self.ctx.url_for(path_or_paths)
 
     def compute_vars(self, raw_vars: Dict[str, Any], inputs: Dict[str, Any]):
-        self.inputs = inputs
-        ev = EvalContext(inputs=inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
+        self.inputs = inputs or {}
+        ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
         try:
             for k, v in (raw_vars or {}).items():
                 self.vars[k] = interpolate(v, ev)
@@ -197,17 +212,20 @@ class DSLRunner:
 
     def _assign_out(self, out_spec: Dict[str, Any], result: Dict[str, Any]):
         for res_key, refname in (out_spec or {}).items():
-            if isinstance(refname, str) and refname.startswith("@"):
-                scope_name = refname[1:]
-                self.scope[scope_name] = result.get(res_key)
+            if not isinstance(refname, str):
+                raise ProblemDetails(title="Invalid out ref", detail=str(refname), code="E_OUT", status=400)
+            m = _REF_RE.match(refname)
+            if not m:
+                raise ProblemDetails(title="Invalid out ref", detail=str(refname), code="E_OUT", status=400)
+            self.scope[m.group(1)] = result.get(res_key)
 
     def _ensure_needs(self, node: Dict[str, Any]):
         needs = node.get("needs") or []
-        for nid in needs:
-            if self.node_status.get(nid) != "succeeded":
+        for dep in needs:
+            if self.node_status.get(dep) != "succeeded":
                 raise ProblemDetails(
                     title="Dependency not satisfied",
-                    detail=f"Node '{node.get('id')}' needs '{nid}'",
+                    detail=f"Node '{node.get('id')}' requires '{dep}' to succeed first",
                     code="E_NEEDS",
                     status=400,
                 )
@@ -215,18 +233,27 @@ class DSLRunner:
     def _exec_op_node(self, node: Dict[str, Any]) -> NodeResult:
         nid = node.get("id") or f"node_{len(self.node_status)+1}"
         self._ensure_needs(node)
+
         raw_in = node.get("in") or {}
         ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
         resolved_in = interpolate(raw_in, ev)
 
-        op = node.get("op")
-        if not isinstance(op, str):
-            raise ProblemDetails(title="Invalid node", detail="op must be string", code="E_NODE", status=400)
+        op = node.get("op") or node.get("run")
+        if not isinstance(op, str) or not op:
+            raise ProblemDetails(title="Invalid node", detail="op/run must be string", code="E_NODE", status=400)
+
         try:
+            if getattr(self.ctx, "emit", None):
+                try:
+                    self.ctx.emit("tool_used", {"op": op, "node_id": nid, "inputs": resolved_in})
+                except Exception:
+                    pass
             result = self.tr.call(op, self.ctx, **resolved_in) or {}
         except ProblemDetails:
+            self.node_status[nid] = "failed"
             raise
         except Exception as e:
+            self.node_status[nid] = "failed"
             raise ProblemDetails(
                 title="Op execution error",
                 detail=f"op={op} node={nid} -> {e}",
@@ -239,47 +266,59 @@ class DSLRunner:
         return NodeResult(id=nid, outputs=result)
 
     def _exec_sequence(self, steps: List[Dict[str, Any]]):
-        for sub in steps:
+        for sub in steps or []:
             self.exec_node(sub)
 
     def _exec_switch(self, when: Dict[str, Any]):
         ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
-        matched = False
         for cond, block in (when or {}).items():
-            if cond.strip().startswith("{{"):
-                expr = cond.strip()[2:-2]
-            else:
-                expr = cond
-            ok = _truthy(_eval_mustache(expr, ev))
+            cond = (cond or "").strip()
+            expr = cond[2:-2] if cond.startswith("{{") and cond.endswith("}}") else cond
+            ok = bool(_eval_mustache(expr, ev))
             if ok:
-                matched = True
-                if isinstance(block, dict) and "do" in block and block.get("op") == "sequence":
+                if isinstance(block, dict) and "do" in block and ((block.get("op") == "sequence") or (block.get("run") == "sequence")):
                     self._exec_sequence(block["do"])
                 elif isinstance(block, dict):
                     self.exec_node(block)
                 else:
                     raise ProblemDetails(title="Invalid switch block", detail=str(block), code="E_SWITCH", status=400)
                 break
-        # no match => no-op
+        # no match → no-op
 
     def exec_node(self, node: Dict[str, Any]) -> Optional[NodeResult]:
-        if node.get("op") == "switch":
+        # Accept both 'op' and legacy 'run'
+        op_name = node.get("op") or node.get("run")
+        nid = node.get("id") or f"node_{len(self.node_status)+1}"
+
+        if op_name == "switch":
             self._exec_switch(node.get("when") or {})
-            nid = node.get("id") or f"node_{len(self.node_status)+1}"
             self.node_status[nid] = "succeeded"
             return None
-        if node.get("op") == "sequence":
+
+        if op_name == "sequence":
             self._exec_sequence(node.get("do") or [])
-            nid = node.get("id") or f"node_{len(self.node_status)+1}"
             self.node_status[nid] = "succeeded"
             return None
-        return self._exec_op_node(node)
+
+        # Normalize to op-node
+        return self._exec_op_node({**node, "op": op_name})
 
     def run(self, flow: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         try:
             self.compute_vars(flow.get("vars") or {}, inputs)
-            for node in flow.get("nodes") or []:
+
+            # Prefer legacy 'steps' if provided; otherwise 'nodes'
+            node_list = None
+            steps = flow.get("steps")
+            if isinstance(steps, list) and steps:
+                node_list = steps
+            else:
+                nodes = flow.get("nodes")
+                node_list = nodes if isinstance(nodes, list) else []
+
+            for node in node_list:
                 self.exec_node(node)
+
             ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
             out_spec = flow.get("outputs") or {}
             resolved = {}

@@ -2,31 +2,28 @@
 version: 1
 
 vars:
-  # Reuse the project_id we pass from the server (or generate one if missing)
   project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
-  # Default slide count if not provided
   slides_count: "{{ inputs.slides_count | default(12) }}"
-  # Placeholder image queries (Arabic-friendly)
   queries: "{{ inputs.images_query_pack | default(['موضوع','أدوات','فوائد','تحديات']) }}"
 
 steps:
 
-  # 1) Pick the outline source (DOCX vs. prompt), with guaranteed fallback to a stub outline
+  # 1) Build an outline (DOCX or prompt), with a guaranteed fallback
   - id: source_branch
     run: switch
     when:
 
-      # ----- From DOCX -----
+      # From DOCX
       "inputs.source == 'docx'":
         run: sequence
         do:
           - id: fetch_docx
             run: io.fetch
             in:
-              # Accepts absolute paths or file:// URLs
+              # MUST be file://... when DEV_OFFLINE=true
               url: "{{ inputs.docx_url }}"
+              # NOTE: this is relative to the project root; don't prefix project_id here
               to_dir: "input"
-              filename: "source.docx"
             out:
               path: "@docx_path"
 
@@ -48,22 +45,22 @@ steps:
             run: slides.outline.from_doc
             in:
               text: "@doc_text"
-              language: "{{ inputs.language }}"
+              language: "{{ inputs.language | default('ar') }}"
               count: "{{ vars.slides_count }}"
             out:
               outline: "@outline"
 
-      # ----- From prompt -----
+      # From prompt
       "inputs.source == 'prompt'":
         run: slides.outline.from_prompt_stub
         in:
           topic: "{{ inputs.topic }}"
-          language: "{{ inputs.language }}"
+          language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
         out:
           outline: "@outline"
 
-      # ----- Fallback (anything else / empty) -----
+      # Fallback (anything else / empty)
       "true":
         run: slides.outline.from_prompt_stub
         in:
@@ -73,7 +70,7 @@ steps:
         out:
           outline: "@outline"
 
-  # 2) Ensure we *have* an outline (last safety net)
+  # 2) Final safety net to ensure an outline exists
   - id: ensure_outline
     run: switch
     when:
@@ -94,7 +91,7 @@ steps:
         out:
           path: "@noop"
 
-  # 3) (Optional) Generate placeholder images – deterministic/local
+  # 3) Deterministic placeholder images (offline-safe)
   - id: get_images
     run: vision.images.from_fixtures
     needs: [ensure_outline]
@@ -104,7 +101,7 @@ steps:
     out:
       images: "@images"
 
-  # 4) Render per-slide HTML
+  # 4) Render HTML slides -> artifacts/<project_id>/slides/*.html
   - id: render
     run: slides.html.render
     needs: [ensure_outline, get_images]
@@ -116,7 +113,7 @@ steps:
     out:
       slides_html: "@slides_html"
 
-  # 5) Export a stub PDF (always writes export/presentation.pdf)
+  # 5) Export PDF -> artifacts/<project_id>/export/presentation.pdf
   - id: export_pdf
     run: slides.export.pdf
     needs: [render]
