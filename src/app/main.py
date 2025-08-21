@@ -12,7 +12,7 @@ from app.api.v1 import services as services_api  # NEW: services endpoints
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import admin
+# from app.api.v1 import admin
 
 
 
@@ -48,7 +48,7 @@ async def health():
 app.include_router(jobs.router,     prefix="/v1", tags=["jobs"])
 app.include_router(events.router,   prefix="/v1", tags=["events"])
 app.include_router(services_api.router, prefix="/v1", tags=["services"])  # NEW
-app.include_router(admin.router)
+# app.include_router(admin.router)
 
 
 @app.on_event("startup")
