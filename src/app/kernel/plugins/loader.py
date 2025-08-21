@@ -302,6 +302,7 @@ def start_watcher(interval: float = 2.0) -> None:
     t = threading.Thread(target=loop, daemon=True, name="plugin-registry-watcher")
     t.start()
 
+
 # # src/app/kernel/plugins/loader.py
 # from __future__ import annotations
 
