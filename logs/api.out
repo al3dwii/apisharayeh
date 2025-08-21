@@ -1,0 +1,20 @@
+[dev-api] starting uvicorn on :8081
+INFO:     Will watch for changes in these directories: ['/Users/omair/apisharayeh']
+INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+INFO:     Started reloader process [48360] using WatchFiles
+/Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import (
+INFO:     Started server process [48378]
+INFO:     Waiting for application startup.
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:     Application startup complete.
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:     127.0.0.1:59895 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59905 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [48378]
+INFO:     Stopping reloader process [48360]

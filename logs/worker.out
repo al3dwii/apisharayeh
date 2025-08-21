@@ -1,0 +1,49 @@
+[dev-worker] environment
+  PYTHONPATH=:/Users/omair/apisharayeh/src
+  DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
+  REDIS_URL_QUEUE=redis://localhost:6379/1
+  PLUGINS_DIR=./plugins
+  ARTIFACTS_DIR=./artifacts
+
+[dev-worker] using Celery app: app.workers.celery_app:celery
+
+ 
+ -------------- worker@Omairs-MacBook-Pro.local v5.4.0 (opalescent)
+--- ***** ----- 
+-- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-21 21:58:05
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         agentic:0x103ed05f0
+- ** ---------- .> transport:   redis://localhost:6379/1
+- ** ---------- .> results:     redis://localhost:6379/1
+- *** --- * --- .> concurrency: 10 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> cpu              exchange=cpu(direct) key=cpu
+                .> default          exchange=default(direct) key=default
+                .> io               exchange=io(direct) key=io
+                .> llm              exchange=llm(direct) key=llm
+
+[tasks]
+  . deliver_webhook
+  . execute_service_job
+
+[2025-08-21 21:58:05,128: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-08-21 21:58:05,139: INFO/MainProcess] Connected to redis://localhost:6379/1
+[2025-08-21 21:58:05,140: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-08-21 21:58:05,142: INFO/MainProcess] mingle: searching for neighbors
+[2025-08-21 21:58:06,153: INFO/MainProcess] mingle: all alone
+[2025-08-21 21:58:06,179: INFO/MainProcess] worker@Omairs-MacBook-Pro.local ready.
+
+worker: Warm shutdown (MainProcess)
