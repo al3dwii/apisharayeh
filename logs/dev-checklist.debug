@@ -1,0 +1,67 @@
++ set -Eeuo pipefail
++ IFS='
+	'
++++ dirname scripts/dev-checklist.sh
+++ cd scripts/..
+++ pwd
++ ROOT=/Users/omair/apisharayeh
++ cd /Users/omair/apisharayeh
++ mkdir -p logs artifacts
++ command -v tput
++ '[' -t 2 ']'
++ CY=
++ OK=
++ WARN=
++ ERR=
++ DIM=
++ NC=
++ need curl
++ command -v curl
++ need jq
++ command -v jq
++ PORT=8081
++ API=http://localhost:8081
++ TENANT=demo-tenant
++ TENANT_HEADER=X-Tenant-ID
++ MIN_PDF_BYTES=256
++ TRACE=1
++ PRINT_SSE=1
++ CHECK_IDEMPOTENCY_CONFLICT=1
++ CHECK_OBSERVABILITY=1
++ PASSES=0
++ WARNS=0
++ FAILS=0
++ section 'Local environment snapshot'
++ echo
+
++ log '── Local environment snapshot ─────────────────────────────────────────────'
++ printf '%s\n' '── Local environment snapshot ─────────────────────────────────────────────'
+── Local environment snapshot ─────────────────────────────────────────────
++ tee logs/checklist.env
+++ pwd
++ echo PWD=/Users/omair/apisharayeh
++ echo API=http://localhost:8081
++ echo TENANT=demo-tenant
++ echo TENANT_HEADER=X-Tenant-ID
++ echo 'FLAGS: TRACE=1 PRINT_SSE=1 CHECK_IDEMPOTENCY_CONFLICT=1 CHECK_OBSERVABILITY=1'
+PWD=/Users/omair/apisharayeh
+API=http://localhost:8081
+TENANT=demo-tenant
+TENANT_HEADER=X-Tenant-ID
+FLAGS: TRACE=1 PRINT_SSE=1 CHECK_IDEMPOTENCY_CONFLICT=1 CHECK_OBSERVABILITY=1
++ section 'Health check'
++ echo
+
++ log '── Health check ─────────────────────────────────────────────'
++ printf '%s\n' '── Health check ─────────────────────────────────────────────'
+── Health check ─────────────────────────────────────────────
++ wait_api
+++ seq 1 60
++ for _ in $(seq 1 60)
++ curl -fsS http://localhost:8081/health
++ return 0
++ pass 'API healthy at http://localhost:8081/health'
++ printf 'PASS  %s\n' 'API healthy at http://localhost:8081/health'
+PASS  API healthy at http://localhost:8081/health
++ inc_pass
++ (( PASSES++ ))

@@ -1,22 +1,23 @@
 [dev-worker] environment
-  PYTHONPATH=:/Users/omair/apisharayeh/src
+  PYTHONPATH=src:
   DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
-  REDIS_URL_QUEUE=redis://localhost:6379/1
+  REDIS_URL_QUEUE=redis://localhost:6379/2
   PLUGINS_DIR=./plugins
   ARTIFACTS_DIR=./artifacts
+  SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
 
-[dev-worker] using Celery app: app.workers.celery_app:celery
-
+[worker] python OK, path entries: 7
+[worker] import app: OK
  
- -------------- worker@Omairs-MacBook-Pro.local v5.4.0 (opalescent)
+ -------------- celery@Omairs-MacBook-Pro.local v5.4.0 (opalescent)
 --- ***** ----- 
--- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-21 21:58:05
+-- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-23 06:49:21
 - *** --- * --- 
 - ** ---------- [config]
-- ** ---------- .> app:         agentic:0x103ed05f0
-- ** ---------- .> transport:   redis://localhost:6379/1
-- ** ---------- .> results:     redis://localhost:6379/1
-- *** --- * --- .> concurrency: 10 (solo)
+- ** ---------- .> app:         agentic:0x107aaf380
+- ** ---------- .> transport:   redis://localhost:6379/2
+- ** ---------- .> results:     redis://localhost:6379/2
+- *** --- * --- .> concurrency: 1 (prefork)
 -- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
 --- ***** ----- 
  -------------- [queues]
@@ -29,21 +30,31 @@
   . deliver_webhook
   . execute_service_job
 
-[2025-08-21 21:58:05,128: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-23 06:49:21,728: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-21 21:58:05,139: INFO/MainProcess] Connected to redis://localhost:6379/1
-[2025-08-21 21:58:05,140: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-23 06:49:21,757: INFO/MainProcess] Connected to redis://localhost:6379/2
+[2025-08-23 06:49:21,758: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-21 21:58:05,142: INFO/MainProcess] mingle: searching for neighbors
-[2025-08-21 21:58:06,153: INFO/MainProcess] mingle: all alone
-[2025-08-21 21:58:06,179: INFO/MainProcess] worker@Omairs-MacBook-Pro.local ready.
+[2025-08-23 06:49:21,760: INFO/MainProcess] mingle: searching for neighbors
+[2025-08-23 06:49:22,770: INFO/MainProcess] mingle: all alone
+[2025-08-23 06:49:22,792: INFO/MainProcess] celery@Omairs-MacBook-Pro.local ready.
+[2025-08-23 06:49:23,567: INFO/MainProcess] Task execute_service_job[f2297ae5-8d71-409d-8fd4-1ce2b58c96a7] received
+[2025-08-23 06:49:23,800: INFO/ForkPoolWorker-1] Task execute_service_job[f2297ae5-8d71-409d-8fd4-1ce2b58c96a7] succeeded in 0.23174224980175495s: None
+[2025-08-23 07:10:45,342: INFO/MainProcess] Task execute_service_job[162c5961-f61c-4b6a-859e-b48bf965f337] received
+[2025-08-23 07:10:45,480: INFO/ForkPoolWorker-1] Task execute_service_job[162c5961-f61c-4b6a-859e-b48bf965f337] succeeded in 0.13574020797386765s: None
+[2025-08-23 07:10:45,660: INFO/MainProcess] Task execute_service_job[dc9bd8d4-6ef2-445a-b7bd-1a314b857d9e] received
+[2025-08-23 07:10:45,785: INFO/ForkPoolWorker-1] Task execute_service_job[dc9bd8d4-6ef2-445a-b7bd-1a314b857d9e] succeeded in 0.12496162485331297s: None
+[2025-08-23 07:10:45,908: INFO/MainProcess] Task execute_service_job[1d406dce-6067-427a-b78d-2db0ecff6854] received
+[2025-08-23 07:10:46,022: INFO/ForkPoolWorker-1] Task execute_service_job[1d406dce-6067-427a-b78d-2db0ecff6854] succeeded in 0.11357508273795247s: None
 
+SIGHUP not supported: Restarting with SIGHUP is unstable on this platform!
 worker: Warm shutdown (MainProcess)
+

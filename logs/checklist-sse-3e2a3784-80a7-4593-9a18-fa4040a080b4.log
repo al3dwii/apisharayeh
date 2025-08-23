@@ -1,0 +1,9 @@
+retry: 5000
+
+event: step
+data: {"event": "step", "data": {"name": "artifact.ready", "status": "info", "artifact": "/artifacts/prj_3001f216/export/presentation.pdf"}}
+
+event: step
+data: {"event": "step", "data": {"name": "service.end", "status": "succeeded", "outline": [{"no": 1, "kind": "/Users/omair/apisharayeh/cover", "title": "/Users/omair/apisharayeh/عرض تقديمي تجريبي", "subtitle": null, "bullets": [], "image": null}, {"no": 2, "kind": "/Users/omair/apisharayeh/index", "title": "/Users/omair/apisharayeh/فهرس المحتوى", "subtitle": null, "bullets": [], "image": null}, {"no": 3, "kind": "/Users/omair/apisharayeh/content", "title": "/Users/omair/apisharayeh/ما هو عرض تقديمي تجريبي", "subtitle": null, "bullets": [], "image": null}], "slides_html": ["/artifacts/prj_3001f216/slides/001.html", "/artifacts/prj_3001f216/slides/002.html", "/artifacts/prj_3001f216/slides/003.html"], "pdf_url": "/artifacts/prj_3001f216/export/presentation.pdf"}}
+
+

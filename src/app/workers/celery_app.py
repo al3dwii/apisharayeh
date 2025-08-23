@@ -1,28 +1,31 @@
 # /Users/omair/apisharayeh/src/app/workers/celery_app.py
 # ------------------------------------------------------------------------------
-# Celery worker (plugins-only)
-# - No legacy packs/agents imports or tasks
-# - Executes services using manifest snapshot stored on the Job row
+# Celery worker (plugins-only, DSL)
+# - Executes services via ServiceRunner (modern DSL)
 # - Emits start/end events; respects tenant RLS via GUC
-# - Optional fallback to in-memory registry if snapshot missing
+# - Normalizes outputs to '/artifacts/...'
+# - Validates produced PDFs (size > 2KB) to catch silent LibreOffice failures
 # - Includes deliver_webhook with exponential backoff
 # ------------------------------------------------------------------------------
 
 from __future__ import annotations
 
 import asyncio
+import os
 import traceback
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Union
+from urllib.parse import urlparse
 
 from celery import Celery
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select, text
 
 from app.core.config import settings
-from app.kernel.plugins.loader import registry as plugin_registry
 from app.kernel.plugins.spec import ServiceManifest
-from app.kernel.runtime import KernelContext, run_service
-from app.services.models import ModelRouter
-from app.services.tools import ToolRouter
+from app.kernel.service_runner import ServiceRunner
+from app.services.events import emit_event
+
 
 # Celery configuration ---------------------------------------------------------
 
@@ -41,69 +44,79 @@ celery.conf.update(
     task_soft_time_limit=60 * 28,   # soft limit: 28 min
 )
 
-# Utilities --------------------------------------------------------------------
 
-class _EventsBridge:
+# Helpers: artifacts URL normalization ----------------------------------------
+
+def _artifacts_root() -> Path:
+    return Path(settings.ARTIFACTS_DIR or "./artifacts").expanduser().resolve()
+
+def _fs_to_artifacts_url(p: Union[str, Path]) -> str:
+    try:
+        path = Path(p).expanduser().resolve()
+    except Exception:
+        return str(p)
+    try:
+        rel = path.relative_to(_artifacts_root())
+    except Exception:
+        return str(path)
+    return f"/artifacts/{rel.as_posix()}"
+
+def _string_to_artifacts_url_if_needed(s: str) -> str:
+    if s.startswith(("http://", "https://")):
+        parsed = urlparse(s)
+        fixed_path = _fs_to_artifacts_url(parsed.path)
+        return fixed_path
+    return _fs_to_artifacts_url(s)
+
+def _normalize_artifact_urls(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {k: _normalize_artifact_urls(v) for k, v in obj.items()}
+
+        for base in ("pdf", "pptx"):
+            p_key, u_key = f"{base}_path", f"{base}_url"
+            if p_key in out and u_key not in out:
+                out[u_key] = _string_to_artifacts_url_if_needed(out[p_key])
+
+        for k, v in list(out.items()):
+            if isinstance(v, str) and (k.endswith("_url") or k in ("artifact", "url")):
+                out[k] = _string_to_artifacts_url_if_needed(v)
+
+        return out
+
+    if isinstance(obj, list):
+        return [_normalize_artifact_urls(v) for v in obj]
+
+    if isinstance(obj, (str, Path)):
+        return _string_to_artifacts_url_if_needed(str(obj))
+
+    return obj
+
+def _json_safe(data: Any) -> Any:
+    return jsonable_encoder(data, custom_encoder={Path: lambda p: str(p)})
+
+def _artifacts_path_from_url(u: str) -> Optional[Path]:
     """
-    Bridge used by Kernel/DSL to emit events.
-    Normalizes various emit call shapes and forwards to async emit_event().
+    Map '/artifacts/<rel>' back to local filesystem path.
+    Returns None if it's not an artifacts URL.
     """
-    def __init__(self, tenant_id: str):
-        self.tenant_id = tenant_id
-
-    def emit(self, *args, **kwargs) -> None:
-        """
-        Accepts:
-          emit(tenant_id, job_id, step, status, payload)
-          emit(job_id, step, payload)  # status 'info'
-          emit(job_id=..., step=..., status=..., payload=...)
-        """
-        from app.services.events import emit_event  # local import to avoid worker import cycles
-
-        # Normalize arguments
-        if len(args) >= 5:
-            tenant_id, job_id, step, status, payload = args[:5]
-        elif len(args) == 4:
-            tenant_id, job_id, step, payload = args
-            status = kwargs.get("status", "info")
-        elif len(args) == 3:
-            job_id, step, payload = args
-            tenant_id = self.tenant_id
-            status = kwargs.get("status", "info")
-        else:
-            tenant_id = kwargs.get("tenant_id", self.tenant_id)
-            job_id = kwargs.get("job_id")
-            step = kwargs.get("step") or kwargs.get("event") or "event"
-            status = kwargs.get("status", "info")
-            payload = kwargs.get("payload", {})
-
-        # Fire-and-forget (run in loop if available, else run inline)
-        try:
-            asyncio.get_event_loop().create_task(
-                emit_event(tenant_id, job_id, step=step, status=status, payload=payload or {})
-            )
-        except RuntimeError:
-            asyncio.run(emit_event(tenant_id, job_id, step=step, status=status, payload=payload or {}))
+    if not isinstance(u, str):
+        return None
+    path = urlparse(u).path  # handles full URLs too
+    if not path.startswith("/artifacts/"):
+        return None
+    rel = path[len("/artifacts/"):]
+    return _artifacts_root() / rel
 
 
 # Tasks ------------------------------------------------------------------------
 
-@celery.task(
-    name="execute_service_job",
-    autoretry_for=(),  # don't auto-retry; caller decides
-)
+@celery.task(name="execute_service_job", autoretry_for=())
 def execute_service_job(job_id: str) -> None:
-    """
-    Execute a plugin service job by job_id.
-    Reads the Job row (tenant_id, manifest_snapshot, input_json), marks it running,
-    builds a KernelContext, runs the service, then persists result/error and emits events.
-    """
     from app.services.db import SessionLocal
     from app.models.job import Job
-    from app.services.events import emit_event
 
     async def _run() -> None:
-        # 1) Load job row (unscoped), get tenant_id, then set RLS GUC before further queries.
+        # 1) Load job & set tenant RLS
         async with SessionLocal() as session:
             res = await session.execute(select(Job).where(Job.id == job_id))
             job = res.scalar_one_or_none()
@@ -113,57 +126,66 @@ def execute_service_job(job_id: str) -> None:
             tenant_id = job.tenant_id
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
 
-            # If already terminal, skip
             if job.status in ("succeeded", "failed"):
                 return
 
             job.status = "running"
             await session.commit()
 
-        await emit_event(tenant_id, job_id, step="service.start", status="started", payload={"kind": job.kind})
+        await emit_event(
+            tenant_id, job_id,
+            step="service.start", status="started",
+            payload={
+                "service_id": job.service_id,
+                "env": {
+                    "SOFFICE_BIN": os.environ.get("SOFFICE_BIN", ""),
+                },
+            },
+        )
 
-        # 2) Reconstruct manifest (prefer snapshot; fallback to registry for resilience)
-        manifest: Optional[ServiceManifest]
+        # 2) Choose service_id (prefer snapshot id)
+        service_id: Optional[str] = job.service_id
         if job.manifest_snapshot:
             try:
-                manifest = ServiceManifest.model_validate(job.manifest_snapshot)
+                snap = ServiceManifest.model_validate(job.manifest_snapshot)
+                if snap and snap.id:
+                    service_id = snap.id
             except Exception:
-                manifest = None
-        else:
-            manifest = None
+                pass
 
-        if manifest is None and job.service_id:
-            # Fallback isn't strictly deterministic, but better than failing if snapshot is absent
-            manifest = plugin_registry.get(job.service_id)
-
-        if manifest is None:
-            err_txt = "Missing service manifest (no snapshot and not in registry)"
-            # Persist failure
+        if not service_id:
+            err = "Job missing service_id"
             async with SessionLocal() as session:
                 await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
                 res = await session.execute(select(Job).where(Job.id == job_id))
                 j = res.scalar_one_or_none()
                 if j:
                     j.status = "failed"
-                    j.error = err_txt
+                    j.error = err
                     await session.commit()
-            await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err_txt})
+            await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err})
             return
 
-        # 3) Build routers and context
-        models = ModelRouter()
-        tools = ToolRouter(models=models)
-        ctx = KernelContext(tenant_id, job_id, _EventsBridge(tenant_id), None, models, tools)
-
-        # 4) Run service (offload sync runner to thread)
-        outputs: Optional[dict[str, Any]] = None
+        # 3) Run via ServiceRunner in a thread
         err_txt: Optional[str] = None
+        outputs: Optional[dict[str, Any]] = None
         try:
-            outputs = await asyncio.to_thread(run_service, manifest, job.input_json or {}, ctx)
-        except Exception:
-            err_txt = traceback.format_exc(limit=8)
+            loop = asyncio.get_running_loop()
+            runner = ServiceRunner(Path(settings.PLUGINS_DIR or "./plugins").resolve())
 
-        # 5) Persist final state + emit end event
+            async def _on_event(event_type: str, payload: dict[str, Any]) -> None:
+                norm = _normalize_artifact_urls(payload or {})
+                await emit_event(tenant_id, job_id, step=event_type, status="info", payload=_json_safe(norm))
+
+            inputs = dict(job.input_json or {})
+            inputs.setdefault("_job_id", str(job_id))
+
+            raw_outputs = await asyncio.to_thread(runner.run, service_id, inputs, _on_event, loop)
+            outputs = _normalize_artifact_urls(raw_outputs)
+        except Exception:
+            err_txt = traceback.format_exc(limit=12)
+
+        # 4) Persist (+ validate artifacts) + events
         async with SessionLocal() as session:
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
             res = await session.execute(select(Job).where(Job.id == job_id))
@@ -176,11 +198,40 @@ def execute_service_job(job_id: str) -> None:
                 j.error = (err_txt or "")[:4000]
                 await session.commit()
                 await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": j.error})
-            else:
-                j.status = "succeeded"
-                j.output_json = outputs or {}
-                await session.commit()
-                await emit_event(tenant_id, job_id, step="service.end", status="succeeded", payload=outputs or {})
+                return
+
+            # Validate PDF size if present (catch silent LibreOffice failures)
+            safe_out = _json_safe(outputs or {})
+            artifact_url = None
+            if isinstance(safe_out, dict):
+                artifact_url = (
+                    safe_out.get("pdf_url")
+                    or safe_out.get("pptx_url")
+                    or safe_out.get("artifact")
+                    or safe_out.get("url")
+                )
+            if isinstance(artifact_url, str):
+                p = _artifacts_path_from_url(artifact_url)
+                if p and p.exists():
+                    try:
+                        size = p.stat().st_size
+                    except Exception:
+                        size = 0
+                    if size < 2048:  # smaller than 2KB is almost certainly a failed export
+                        err_msg = f"artifact too small ({size} bytes) — check LibreOffice. SOFFICE_BIN={os.environ.get('SOFFICE_BIN','')}"
+                        j.status = "failed"
+                        j.error = err_msg
+                        await session.commit()
+                        await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err_msg})
+                        return
+
+                await emit_event(tenant_id, job_id, step="artifact.ready", status="info", payload={"artifact": artifact_url})
+
+            # Success
+            j.status = "succeeded"
+            j.output_json = safe_out
+            await session.commit()
+            await emit_event(tenant_id, job_id, step="service.end", status="succeeded", payload=safe_out)
 
     asyncio.run(_run())
 
@@ -192,10 +243,6 @@ def execute_service_job(job_id: str) -> None:
     default_retry_delay=30,  # seconds; exponential backoff below
 )
 def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
-    """
-    Deliver a queued webhook using tenant-scoped RLS.
-    IMPORTANT: enqueue must schedule with (tenant_id, delivery_id).
-    """
     import httpx
     from app.services.db import SessionLocal
     from app.models.webhook_delivery import WebhookDelivery
@@ -203,9 +250,7 @@ def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
 
     async def _send() -> None:
         async with SessionLocal() as session:
-            # Set tenant BEFORE first SELECT (RLS)
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-
             res = await session.execute(select(WebhookDelivery).where(WebhookDelivery.id == delivery_id))
             d = res.scalar_one_or_none()
             if not d:
@@ -242,6 +287,5 @@ def deliver_webhook(self, tenant_id: str, delivery_id: str) -> None:
     try:
         asyncio.run(_send())
     except Exception as exc:
-        # exponential backoff with cap
         delay = min(600, (2 ** max(0, self.request.retries)) * 10)
         raise self.retry(exc=exc, countdown=delay)
