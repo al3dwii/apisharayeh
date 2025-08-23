@@ -1,102 +1,14 @@
-[api] 2025-08-23 06:49:21 PWD=/Users/omair/apisharayeh
-[api] 2025-08-23 06:49:21 PYTHONPATH=src:
-[api] 2025-08-23 06:49:21 DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
-[api] 2025-08-23 06:49:21 REDIS_URL=redis://localhost:6379/1
-[api] 2025-08-23 06:49:21 PLUGINS_DIR=./plugins
-[api] 2025-08-23 06:49:21 ARTIFACTS_DIR=./artifacts
-[api] 2025-08-23 06:49:21 SERVICE_FLAGS=*
-[api] 2025-08-23 06:49:21 PUBLIC_BASE_URL=http://localhost:8081
-[api] 2025-08-23 06:49:21 SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
-[api] 2025-08-23 06:49:21 preflight: importing app.main ...
-[api] 2025-08-23 06:49:21 src/ exists; listing packages:
-[api]  total 240
-[api]  drwxr-xr-x  25 omair  staff    800 Aug 21 22:43 .
-[api]  drwxr-xr-x@ 20 omair  staff    640 Aug 23 06:49 ..
-[api]  -rw-r--r--@  1 omair  staff   6148 Aug 17 21:40 .DS_Store
-[api]  -rw-r--r--   1 omair  staff    302 Aug 18 12:11 .dockerignore
-[api]  drwxr-xr-x   3 omair  staff     96 Aug 12 19:53 .github
-[api]  -rw-r--r--   1 omair  staff    416 Aug 12 19:53 .gitignore
-[api]  drwxr-xr-x   6 omair  staff    192 Aug 20 13:25 .pytest_cache
-[api]  -rw-r--r--   1 omair  staff   1077 Aug 18 10:06 Dockerfile
-[api]  -rw-r--r--   1 omair  staff   1350 Aug 18 10:13 Makefile
-[api]  -rw-r--r--   1 omair  staff   4396 Aug 18 09:44 README.md
-[api]  drwxr-xr-x   3 omair  staff     96 Aug 19 13:06 __pycache__
-[api]  drwxr-xr-x  19 omair  staff    608 Aug 23 05:11 app
-[api]  drwxr-xr-x   3 omair  staff     96 Aug 15 09:54 artifacts
-[api]  drwxr-xr-x   3 omair  staff     96 Aug 12 19:53 charts
-[api]  drwxr-xr-x   3 omair  staff     96 Aug 14 15:14 config
-[api]  drwxr-xr-x   4 omair  staff    128 Aug 12 19:53 db
-[api]  drwxr-xr-x   5 omair  staff    160 Aug 18 10:03 infra
-[api]  drwxr-xr-x   4 omair  staff    128 Aug 12 19:53 logs
-[api]  -rw-r--r--   1 omair  staff    276 Aug 12 19:53 package.json
-[api]  -rw-r--r--   1 omair  staff    736 Aug 18 10:13 replacements.txt
-[api]  -rw-r--r--@  1 omair  staff   1198 Aug 20 13:21 requirements.txt
-[api]  -rw-r--r--   1 omair  staff    646 Aug 19 13:05 run_server.py
-[api]  -rw-r--r--   1 omair  staff  36044 Aug 18 09:44 sample.pptx
-[api]  -rw-r--r--   1 omair  staff  33546 Aug 18 09:44 test.pptx
-[api]  drwxr-xr-x   4 omair  staff    128 Aug 20 13:25 tests
-[api]  total 32
-[api]  drwxr-xr-x  19 omair  staff   608 Aug 23 05:11 .
-[api]  drwxr-xr-x  25 omair  staff   800 Aug 21 22:43 ..
-[api]  -rw-r--r--@  1 omair  staff  8196 Aug 20 09:47 .DS_Store
-[api]  -rw-r--r--   1 omair  staff     0 Aug 12 19:53 __init__.py
-[api]  drwxr-xr-x   4 omair  staff   128 Aug 20 19:16 __pycache__
-[api]  drwxr-xr-x   6 omair  staff   192 Aug 12 19:53 agents
-[api]  drwxr-xr-x   4 omair  staff   128 Aug 21 01:47 api
-[api]  drwxr-xr-x   9 omair  staff   288 Aug 20 13:31 core
-[api]  drwxr-xr-x@ 18 omair  staff   576 Aug 23 05:25 kernel
-[api]  -rw-r--r--   1 omair  staff  2342 Aug 20 19:16 main.py
-[api]  drwxr-xr-x   5 omair  staff   160 Aug 20 13:31 memory
-[api]  drwxr-xr-x  10 omair  staff   320 Aug 20 13:31 models
-[api]  drwxr-xr-x@  6 omair  staff   192 Aug 20 13:30 ops
-[api]  drwxr-xr-x@  4 omair  staff   128 Aug 23 04:33 plugins
-[api]  drwxr-xr-x  10 omair  staff   320 Aug 19 14:20 server
-[api]  drwxr-xr-x  20 omair  staff   640 Aug 20 13:30 services
-[api]  drwxr-xr-x  11 omair  staff   352 Aug 20 13:30 tools
-[api]  drwxr-xr-x   3 omair  staff    96 Aug 23 05:11 utils
-[api]  drwxr-xr-x   5 omair  staff   160 Aug 23 04:34 workers
 /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   from pkg_resources import (
-[api] python: 3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 08:22:19) [Clang 14.0.6 ]
-[api] sys.path: [
-  "",
-  "/Users/omair/apisharayeh/src",
-  "/Users/omair/apisharayeh",
-  "/opt/anaconda3/lib/python312.zip",
-  "/opt/anaconda3/lib/python3.12",
-  "/opt/anaconda3/lib/python3.12/lib-dynload",
-  "/Users/omair/apisharayeh/.venv/lib/python3.12/site-packages"
-]
-[api] preflight import: OK
-/Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  from pkg_resources import (
-INFO:     Started server process [43204]
+INFO:     Started server process [46169]
 INFO:     Waiting for application startup.
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
-INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
-INFO:     127.0.0.1:63962 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63965 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63967 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63969 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:63977 - "GET /v1/jobs/3490d158-58e8-455d-b956-660e9c1c83f0/events HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63986 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63988 - "GET /artifacts/prj_f95516aa/export/presentation.pdf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63993 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64055 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64073 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65151 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65259 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65338 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65340 - "POST /v1/jobs HTTP/1.1" 422 Unprocessable Entity
-INFO:     127.0.0.1:65342 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65344 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:65351 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:65358 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:65364 - "POST /v1/jobs HTTP/1.1" 409 Conflict
-INFO:     127.0.0.1:65371 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:65377 - "GET /v1/jobs/3e2a3784-80a7-4593-9a18-fa4040a080b4/events HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65383 - "GET /artifacts/prj_3001f216/export/presentation.pdf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64462 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64465 - "POST /v1/jobs HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:64476 - "GET /v1/jobs/1df0d2c9-6781-4240-9183-3a1f33eea68c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64501 - "GET /v1/jobs/1df0d2c9-6781-4240-9183-3a1f33eea68c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64506 - "GET /artifacts/prj_de436574/export/presentation.pdf HTTP/1.1" 200 OK
