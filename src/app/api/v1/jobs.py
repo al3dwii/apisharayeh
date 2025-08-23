@@ -6,11 +6,13 @@
 # - idempotency via Idempotency-Key header
 # - queues to Celery based on manifest.resources.queue (default "cpu")
 # - multi-tenant safe lookups (always filter by tenant_id)
+# - normalizes artifact URLs in responses (maps fs paths → /artifacts/…)
 # ---------------------------------------------------------------------------
 
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, status
@@ -25,41 +27,21 @@ from app.services.db import tenant_session
 from app.services.idempotency import put_if_absent, get_job_for_key
 from app.models.job import Job
 from app.kernel.plugins.spec import ServiceManifest
+from app.kernel.storage import url_for as storage_url_for
 
-# Worker for plugins (native/in-proc or DSL executed inside the worker)
 from app.workers.celery_app import execute_service_job
 
 
 router = APIRouter(tags=["jobs"])
 
 
-# ----------------------------
-# Request / Response models
-# ----------------------------
-
 class JobCreate(BaseModel):
-    """
-    Create a job for a plugin service.
-
-    - service_id: REQUIRED. Must be enabled for the tenant.
-    - inputs:     Validated against the service manifest JSON-Schema.
-    - webhook_url: Optional (not persisted); if you need webhooks, wire this
-                   through your worker via a job metadata store instead.
-    """
-    service_id: str = Field(..., description="Plugin service identifier (e.g., 'office.word_to_pptx')")
+    service_id: str = Field(..., description="Plugin service identifier (e.g., 'slides.generate')")
     inputs: Dict[str, Any] = Field(default_factory=dict)
     webhook_url: Optional[str] = Field(default=None)
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
-
 async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) -> ServiceManifest:
-    """
-    Fetch the enabled manifest for this tenant + service_id.
-    Raises 403 if not allowed.
-    """
     sql = text(
         """
         SELECT pr.spec
@@ -83,9 +65,6 @@ async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) 
 
 
 def _validate_inputs_against_manifest(manifest: ServiceManifest, inputs: Dict[str, Any]) -> None:
-    """
-    Validate inputs dict against the manifest's JSON-Schema.
-    """
     schema = manifest.inputs or {"type": "object"}
     try:
         DraftValidator(schema).validate(inputs or {})
@@ -98,9 +77,26 @@ def _validate_inputs_against_manifest(manifest: ServiceManifest, inputs: Dict[st
         ) from e
 
 
-# ----------------------------
-# Routes
-# ----------------------------
+def _normalize_output(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out = {k: _normalize_output(v) for k, v in obj.items()}
+
+        for base in ("pdf", "pptx"):
+            p, u = f"{base}_path", f"{base}_url"
+            if p in out and u not in out:
+                out[u] = storage_url_for(out[p])
+
+        for k, v in list(out.items()):
+            if isinstance(v, (str, Path)) and (k.endswith("_url") or k in ("artifact", "url")):
+                out[k] = storage_url_for(v)
+
+        return out
+    if isinstance(obj, list):
+        return [_normalize_output(v) for v in obj]
+    if isinstance(obj, (str, Path)):
+        return storage_url_for(obj)
+    return obj
+
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_job(
@@ -109,29 +105,18 @@ async def create_job(
     tenant=Depends(get_tenant),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
-    """
-    Create a new job for a plugin service.
-    - Requires service_id.
-    - Validates inputs via manifest JSON-Schema.
-    - Enqueues a worker task that will execute the service.
-    - Returns 202 + Location header pointing to /v1/jobs/{id}.
-    """
-    # 0) Rate limit
     await check_rate_limit(tenant.id, tenant.user_id)
 
-    # 1) Resolve & validate manifest (governance)
     async with tenant_session(tenant.id) as session:
         manifest = await resolve_manifest_for_tenant(session, tenant.id, req.service_id)
     _validate_inputs_against_manifest(manifest, req.inputs)
 
-    # 2) Idempotency check (by tenant + header key)
     payload_for_hash = req.inputs or {}
     job_id = str(uuid.uuid4())
 
     if idempotency_key:
         existing_id = await get_job_for_key(tenant.id, idempotency_key)
         if existing_id:
-            # Return the existing job if payload matches, else 409
             async with tenant_session(tenant.id) as session:
                 res = await session.execute(
                     select(Job).where(Job.id == existing_id, Job.tenant_id == tenant.id)
@@ -146,38 +131,32 @@ async def create_job(
                     response.headers["Location"] = f"/v1/jobs/{existing.id}"
                     return {"id": existing.id, "status": existing.status, "idempotent": True}
         else:
-            # Win the race to claim the key → job_id
             ok = await put_if_absent(tenant.id, idempotency_key, job_id)
             if not ok:
-                # Another request won; return the winner
                 winner_id = await get_job_for_key(tenant.id, idempotency_key)
                 if winner_id:
                     response.headers["Location"] = f"/v1/jobs/{winner_id}"
                     return {"id": winner_id, "status": "queued", "idempotent": True}
 
-    # 3) Persist job row
     async with tenant_session(tenant.id) as session:
         job = Job(
             id=job_id,
             tenant_id=tenant.id,
-            kind=manifest.id,  # for quick filtering
+            kind=manifest.id,
             status="queued",
             input_json=req.inputs or {},
             service_id=manifest.id,
             service_version=manifest.version,
             service_runtime=manifest.runtime,
-            manifest_snapshot=manifest.model_dump(),  # freeze for audit
+            manifest_snapshot=manifest.model_dump(),
         )
         session.add(job)
         await session.commit()
 
-    # 4) Enqueue worker task
     try:
         queue = (manifest.resources or {}).get("queue", "cpu")
-        # Enqueue by job_id; worker re-loads the row and executes based on snapshot/runtime
         execute_service_job.apply_async(args=[job_id], queue=queue)
     except Exception as e:
-        # Mark job failed if enqueue fails
         async with tenant_session(tenant.id) as session:
             res = await session.execute(
                 select(Job).where(Job.id == job_id, Job.tenant_id == tenant.id)
@@ -198,9 +177,6 @@ async def create_job(
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str, tenant=Depends(get_tenant)):
-    """
-    Fetch a job status/result (tenant-scoped).
-    """
     async with tenant_session(tenant.id) as session:
         res = await session.execute(
             select(Job).where(Job.id == job_id, Job.tenant_id == tenant.id)
@@ -208,12 +184,15 @@ async def get_job(job_id: str, tenant=Depends(get_tenant)):
         job = res.scalar_one_or_none()
         if not job:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+        output_norm = _normalize_output(job.output_json) if job.output_json else None
+
         return {
             "id": job.id,
             "status": job.status,
             "kind": job.kind,
             "input": job.input_json,
-            "output": job.output_json,
+            "output": output_norm,
             "error": job.error,
             "updated_at": job.updated_at.isoformat() if getattr(job, "updated_at", None) else None,
         }

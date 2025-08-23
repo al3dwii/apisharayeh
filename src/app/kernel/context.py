@@ -1,7 +1,9 @@
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Any, Set, Optional, Callable
+from pathlib import Path
+from typing import Dict, Any, Set, Union
+
 from . import storage
 from .events import EventEmitter
 
@@ -28,17 +30,17 @@ class ExecutionContext:
         self.emitter.emit(event_type, base)
 
     # Storage helpers
-    def artifacts_dir(self, *parts: str):
+    def artifacts_dir(self, *parts: str) -> Path:
         return storage.subdir(self.project_id, *parts)
 
-    def write_text(self, rel_path: str, text: str):
+    def write_text(self, rel_path: str, text: str) -> Path:
         return storage.write_text(self.project_id, rel_path, text)
 
-    def write_bytes(self, rel_path: str, data: bytes):
+    def write_bytes(self, rel_path: str, data: bytes) -> Path:
         return storage.write_bytes(self.project_id, rel_path, data)
 
-    def copy_in(self, src_path, rel_dest: str):
+    def copy_in(self, src_path: Union[str, Path], rel_dest: str) -> Path:
         return storage.copy_in(self.project_id, src_path, rel_dest)
 
-    def url_for(self, path):
+    def url_for(self, path: Union[str, Path]) -> str:
         return storage.url_for(path)
