@@ -1,0 +1,149 @@
+id: slides.author
+name: "Slides: Authoring"
+version: "0.1.0"
+summary: "Plan -> research -> build slides -> live render -> export."
+runtime: dsl
+entrypoint: flow.yaml
+permissions:
+  fs_read: true
+  fs_write: true
+inputs:
+  type: object
+  properties:
+    project_id: { type: string }
+    source: { type: string, enum: ["docx","prompt"] }
+    docx_url: { type: string }
+    topic: { type: string }
+    prompt: { type: string }
+    language: { type: string, default: "ar" }
+    slides_count: { type: integer, default: 5, minimum: 1, maximum: 30 }
+    theme: { type: string, default: "academic-ar" }
+outputs:
+  project_id: { type: string }
+  slides_html:
+    type: array
+    items: { type: string }
+  pdf_url: { type: string }
+  pptx_url: { type: string }
+  html_zip_url: { type: string }
+events: { todos: [] }
+
+---
+version: 1
+
+vars:
+  project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
+  slides_count: "{{ inputs.slides_count | default(5) }}"
+  topic: "{{ inputs.topic or inputs.prompt or 'عرض تقديمي' }}"
+  language: "{{ inputs.language | default('ar') }}"
+
+steps:
+  - id: narrate_welcome
+    run: io.save_text
+    in: { to_dir: "tmp", filename: "noop.txt", text: "ok" }
+    out: { path: "@noop" }
+
+  - id: say_welcome
+    run: echo
+    in:
+      text: "أهلاً بك! سأساعدك في إنشاء عرض تقديمي عن {{ vars.topic }} يتكون من {{ vars.slides_count }} شرائح..."
+
+  - id: plan
+    run: research.plan
+    in:
+      topic: "{{ vars.topic }}"
+      slides_count: "{{ vars.slides_count }}"
+
+  - id: source_branch
+    run: switch
+    when:
+      "inputs.source == 'docx'":
+        run: sequence
+        do:
+          - id: fetch_docx
+            run: io.fetch
+            in: { url: "{{ inputs.docx_url }}", to_dir: "input" }
+            out: { path: "@docx_path" }
+          - id: parse_docx
+            run: doc.parse_docx
+            in: { path: "@docx_path" }
+            out: { text: "@doc_text" }
+          - id: outline
+            run: slides.outline.from_doc
+            in: { text: "@doc_text", language: "{{ vars.language }}", count: "{{ vars.slides_count }}" }
+            out: { outline: "@outline" }
+      "true":
+        run: slides.outline.from_prompt_stub
+        in: { topic: "{{ vars.topic }}", language: "{{ vars.language }}", count: "{{ vars.slides_count }}" }
+        out: { outline: "@outline" }
+
+  - id: parallel_search
+    run: research.parallel_search
+    in:
+      queries:
+        - "{{ vars.topic }} تعريف أنواع"
+        - "فوائد {{ vars.topic }} مزايا"
+        - "تحديات {{ vars.topic }} عقبات"
+        - "منصات {{ vars.topic }} أدوات"
+        - "اتجاهات {{ vars.topic }} 2025"
+
+  - id: read_trends
+    run: research.read
+    in: { url: "https://aanaab.com/blog/education-tech-trends" }
+
+  - id: images1
+    run: research.image_search
+    in: { query: "{{ vars.topic }} منصات تعليمية رقمية", project_id: "{{ vars.project_id }}" }
+
+  - id: images2
+    run: research.image_search
+    in: { query: "VR education", project_id: "{{ vars.project_id }}" }
+
+  - id: images3
+    run: research.image_search
+    in: { query: "AI education", project_id: "{{ vars.project_id }}" }
+
+  - id: render
+    run: slides.html.render
+    in:
+      project_id: "{{ vars.project_id }}"
+      outline: "@outline"
+      theme: "{{ inputs.theme | default('academic-ar') }}"
+      images: "@images3.images"
+    out: { slides_html: "@slides_html" }
+
+  # NEW: build static index.html and emit artifact.ready { kind: "link" }
+  - id: index_link
+    run: slides.index.render
+    in:
+      project_id: "{{ vars.project_id }}"
+    out: { link_url: "@link_url" }
+
+  - id: build_pptx
+    run: slides.pptx.build
+    needs: [render]
+    in:
+      project_id: "{{ vars.project_id }}"
+      outline: "@outline"
+      title: "{{ (@outline and @outline[0]['title']) or vars.topic }}"
+      language: "{{ vars.language }}"
+    out: { pptx_url: "@pptx_url", pptx_path: "@pptx_path" }
+
+  - id: export_pdf
+    run: slides.export.pdf_via_lo
+    needs: [build_pptx]
+    in: { project_id: "{{ vars.project_id }}", pptx_path: "@pptx_path" }
+    out: { pdf_url: "@pdf_url" }
+
+  - id: export_html
+    run: slides.export.html_via_lo
+    needs: [build_pptx]
+    in: { project_id: "{{ vars.project_id }}", pptx_path: "@pptx_path" }
+    out: { html_zip_url: "@html_zip_url" }
+
+outputs:
+  project_id: "{{ vars.project_id }}"
+  slides_html: "@slides_html"
+  pdf_url: "@pdf_url"
+  pptx_url: "@pptx_url"
+  html_zip_url: "@html_zip_url"

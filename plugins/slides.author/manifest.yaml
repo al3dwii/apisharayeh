@@ -1,0 +1,29 @@
+id: slides.author
+name: "Slides: Authoring"
+version: "0.1.0"
+summary: "Plan → research → build slides → live render → export."
+runtime: dsl
+entrypoint: flow.yaml
+permissions:
+  fs_read: true
+  fs_write: true
+inputs:
+  type: object
+  properties:
+    project_id: { type: string }
+    source: { type: string, enum: ["docx","prompt"], default: "prompt" }
+    docx_url: { type: string }
+    topic: { type: string }
+    prompt: { type: string }
+    language: { type: string, default: "ar" }
+    slides_count: { type: integer, default: 5, minimum: 1, maximum: 30 }
+    theme: { type: string, default: "academic-ar" }
+  required: []
+outputs:
+  project_id: { type: string }
+  slides_html:
+    type: array
+    items: { type: string }
+  pdf_url: { type: string }
+  pptx_url: { type: string }
+  html_zip_url: { type: string }
