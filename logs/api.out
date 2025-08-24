@@ -1,17 +1,17 @@
-[api] 2025-08-24 12:44:29 PWD=/Users/omair/apisharayeh
-[api] 2025-08-24 12:44:29 PYTHONPATH=src:
-[api] 2025-08-24 12:44:29 DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
-[api] 2025-08-24 12:44:29 REDIS_URL=redis://localhost:6379/1
-[api] 2025-08-24 12:44:29 PLUGINS_DIR=./plugins
-[api] 2025-08-24 12:44:29 ARTIFACTS_DIR=./artifacts
-[api] 2025-08-24 12:44:29 SERVICE_FLAGS=*
-[api] 2025-08-24 12:44:29 PUBLIC_BASE_URL=http://localhost:8081
-[api] 2025-08-24 12:44:29 SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
-[api] 2025-08-24 12:44:29 preflight: importing app.main ...
-[api] 2025-08-24 12:44:29 src/ exists; listing packages:
+[api] 2025-08-24 19:06:21 PWD=/Users/omair/apisharayeh
+[api] 2025-08-24 19:06:21 PYTHONPATH=src:
+[api] 2025-08-24 19:06:21 DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
+[api] 2025-08-24 19:06:21 REDIS_URL=redis://localhost:6379/1
+[api] 2025-08-24 19:06:21 PLUGINS_DIR=./plugins
+[api] 2025-08-24 19:06:21 ARTIFACTS_DIR=./artifacts
+[api] 2025-08-24 19:06:21 SERVICE_FLAGS=*
+[api] 2025-08-24 19:06:21 PUBLIC_BASE_URL=http://localhost:8081
+[api] 2025-08-24 19:06:21 SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
+[api] 2025-08-24 19:06:21 preflight: importing app.main ...
+[api] 2025-08-24 19:06:21 src/ exists; listing packages:
 [api]  total 240
 [api]  drwxr-xr-x  25 omair  staff    800 Aug 21 22:43 .
-[api]  drwxr-xr-x@ 22 omair  staff    704 Aug 24 12:44 ..
+[api]  drwxr-xr-x@ 22 omair  staff    704 Aug 24 19:06 ..
 [api]  -rw-r--r--@  1 omair  staff   6148 Aug 17 21:40 .DS_Store
 [api]  -rw-r--r--   1 omair  staff    302 Aug 18 12:11 .dockerignore
 [api]  drwxr-xr-x   3 omair  staff     96 Aug 12 19:53 .github
@@ -40,12 +40,12 @@
 [api]  drwxr-xr-x  25 omair  staff   800 Aug 21 22:43 ..
 [api]  -rw-r--r--@  1 omair  staff  8196 Aug 20 09:47 .DS_Store
 [api]  -rw-r--r--   1 omair  staff     0 Aug 12 19:53 __init__.py
-[api]  drwxr-xr-x   4 omair  staff   128 Aug 24 00:14 __pycache__
+[api]  drwxr-xr-x   4 omair  staff   128 Aug 24 16:58 __pycache__
 [api]  drwxr-xr-x   6 omair  staff   192 Aug 12 19:53 agents
-[api]  drwxr-xr-x   5 omair  staff   160 Aug 24 12:41 api
+[api]  drwxr-xr-x   4 omair  staff   128 Aug 24 16:57 api
 [api]  drwxr-xr-x  11 omair  staff   352 Aug 23 22:59 core
 [api]  drwxr-xr-x@ 19 omair  staff   608 Aug 23 23:01 kernel
-[api]  -rw-r--r--   1 omair  staff  2271 Aug 24 12:43 main.py
+[api]  -rw-r--r--   1 omair  staff  2357 Aug 24 16:58 main.py
 [api]  drwxr-xr-x   5 omair  staff   160 Aug 20 13:31 memory
 [api]  drwxr-xr-x  10 omair  staff   320 Aug 20 13:31 models
 [api]  drwxr-xr-x@  6 omair  staff   192 Aug 20 13:30 ops
@@ -70,35 +70,20 @@
 [api] preflight import: OK
 /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   from pkg_resources import (
-INFO:     Started server process [23158]
+INFO:     Started server process [26326]
 INFO:     Waiting for application startup.
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
 INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
-INFO:     127.0.0.1:61936 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61939 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61941 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61943 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:61951 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1/events HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62136 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62139 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62143 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62147 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62151 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62155 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62159 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62164 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62172 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62176 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62179 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62182 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62185 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62189 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62196 - "GET /v1/jobs/96051323-f699-48be-bddb-9194ccf7ded1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62199 - "GET /artifacts/prj_58d1faf5/export/presentation.pdf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61410 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61415 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61417 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61419 - "POST /v1/jobs HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:61427 - "GET /v1/jobs/c951e018-6ca7-47cd-81cc-b1b81903a4f0/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61475 - "GET /artifacts/prj_65a9250f/export/presentation.pdf HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [23158]
+INFO:     Finished server process [26326]

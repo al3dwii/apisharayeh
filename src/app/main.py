@@ -22,7 +22,8 @@ from app.api.v1.services import router as services_router
 from app.kernel.plugins.loader import registry as plugin_registry, start_watcher
 from app.services.registry_store import sync_all_from_loader
 
-from app.api.routes.slides import router as slides_router  # ⟵ add this
+from app.api.routes.slides import router as slides_router  
+from app.api.routes.uploads import router as uploads_router  
 
 
 app = FastAPI(title="Agentic Backend", version="1.0.0")
@@ -64,6 +65,8 @@ app.include_router(jobs.router,     prefix="/v1", tags=["jobs"])
 app.include_router(events.router,   prefix="/v1", tags=["events"])
 app.include_router(services_router, prefix="/v1", tags=["services"])
 app.include_router(slides_router)  
+app.include_router(uploads_router)  
+
 
 
 
