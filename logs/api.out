@@ -1,17 +1,17 @@
-[api] 2025-08-24 19:06:21 PWD=/Users/omair/apisharayeh
-[api] 2025-08-24 19:06:21 PYTHONPATH=src:
-[api] 2025-08-24 19:06:21 DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
-[api] 2025-08-24 19:06:21 REDIS_URL=redis://localhost:6379/1
-[api] 2025-08-24 19:06:21 PLUGINS_DIR=./plugins
-[api] 2025-08-24 19:06:21 ARTIFACTS_DIR=./artifacts
-[api] 2025-08-24 19:06:21 SERVICE_FLAGS=*
-[api] 2025-08-24 19:06:21 PUBLIC_BASE_URL=http://localhost:8081
-[api] 2025-08-24 19:06:21 SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
-[api] 2025-08-24 19:06:21 preflight: importing app.main ...
-[api] 2025-08-24 19:06:21 src/ exists; listing packages:
+[api] 2025-08-24 22:17:44 PWD=/Users/omair/apisharayeh
+[api] 2025-08-24 22:17:44 PYTHONPATH=src:
+[api] 2025-08-24 22:17:44 DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
+[api] 2025-08-24 22:17:44 REDIS_URL=redis://localhost:6379/1
+[api] 2025-08-24 22:17:44 PLUGINS_DIR=./plugins
+[api] 2025-08-24 22:17:44 ARTIFACTS_DIR=./artifacts
+[api] 2025-08-24 22:17:44 SERVICE_FLAGS=*
+[api] 2025-08-24 22:17:44 PUBLIC_BASE_URL=http://localhost:8081
+[api] 2025-08-24 22:17:44 SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
+[api] 2025-08-24 22:17:44 preflight: importing app.main ...
+[api] 2025-08-24 22:17:44 src/ exists; listing packages:
 [api]  total 240
 [api]  drwxr-xr-x  25 omair  staff    800 Aug 21 22:43 .
-[api]  drwxr-xr-x@ 22 omair  staff    704 Aug 24 19:06 ..
+[api]  drwxr-xr-x@ 23 omair  staff    736 Aug 24 22:17 ..
 [api]  -rw-r--r--@  1 omair  staff   6148 Aug 17 21:40 .DS_Store
 [api]  -rw-r--r--   1 omair  staff    302 Aug 18 12:11 .dockerignore
 [api]  drwxr-xr-x   3 omair  staff     96 Aug 12 19:53 .github
@@ -50,7 +50,7 @@
 [api]  drwxr-xr-x  10 omair  staff   320 Aug 20 13:31 models
 [api]  drwxr-xr-x@  6 omair  staff   192 Aug 20 13:30 ops
 [api]  drwxr-xr-x@  4 omair  staff   128 Aug 23 04:33 plugins
-[api]  drwxr-xr-x  10 omair  staff   320 Aug 19 14:20 server
+[api]  drwxr-xr-x  11 omair  staff   352 Aug 24 20:58 server
 [api]  drwxr-xr-x  21 omair  staff   672 Aug 23 23:00 services
 [api]  drwxr-xr-x  11 omair  staff   352 Aug 20 13:30 tools
 [api]  drwxr-xr-x   3 omair  staff    96 Aug 23 05:11 utils
@@ -70,20 +70,19 @@
 [api] preflight import: OK
 /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   from pkg_resources import (
-INFO:     Started server process [26326]
+INFO:     Started server process [92838]
 INFO:     Waiting for application startup.
-INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
-INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 2 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 2 service(s) loaded from /Users/omair/apisharayeh/plugins
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
-INFO:app.kernel.plugins.loader:Plugin registry refreshed: 1 service(s) loaded from /Users/omair/apisharayeh/plugins
-INFO:     127.0.0.1:61410 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61415 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61417 - "GET /v1/services HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61419 - "POST /v1/jobs HTTP/1.1" 202 Accepted
-INFO:     127.0.0.1:61427 - "GET /v1/jobs/c951e018-6ca7-47cd-81cc-b1b81903a4f0/events HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61475 - "GET /artifacts/prj_65a9250f/export/presentation.pdf HTTP/1.1" 200 OK
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [26326]
+INFO:app.kernel.plugins.loader:Plugin registry refreshed: 2 service(s) loaded from /Users/omair/apisharayeh/plugins
+INFO:     127.0.0.1:53449 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53451 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53453 - "POST /v1/services/slides.author/jobs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:53455 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53460 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53464 - "GET /v1/services HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53466 - "POST /v1/jobs HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:53474 - "GET /v1/jobs/03a615d2-2b8a-4637-9a10-5ce1ceb2869d/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53538 - "GET /artifacts/prj_80221625/export/presentation.pdf HTTP/1.1" 200 OK

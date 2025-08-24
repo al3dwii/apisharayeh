@@ -1,118 +1,307 @@
-# src/app/kernel/bootstrap_toolrouter.py
 from __future__ import annotations
 
 from .toolrouter import ToolRouter
 
-# --- built-in ops
+# Ops modules
 from .ops import io as io_ops
 from .ops import slides as slides_ops
+from .ops import slides_stateful as slides_stateful_ops
+from .ops import slides_index as slides_index_ops  # ← NEW
 from .ops import doc as doc_ops
 from .ops import vision as vision_ops
-from .ops import research as research_ops  # ⟵ NEW: wire research stubs
+from .ops import research as research_ops
+from .ops import echo as echo_ops
 
+def _perms(fn, default):
+    return getattr(fn, "required_permissions", default)
+
+def _pick(module, *names):
+    for n in names:
+        fn = getattr(module, n, None)
+        if fn is not None:
+            return fn
+    raise AttributeError(f"{module.__name__} missing one of {names!r}")
 
 def build_toolrouter() -> ToolRouter:
     tr = ToolRouter()
 
-    # ---------------- IO ----------------
-    tr.register(
-        "io.fetch",
-        io_ops.fetch,
-        getattr(io_ops.fetch, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "io.save_text",
-        io_ops.save_text,
-        getattr(io_ops.save_text, "required_permissions", {"fs_write"}),
-    )
+    # IO
+    tr.register("io.fetch", io_ops.fetch, _perms(io_ops.fetch, {"fs_write"}))
+    tr.register("io.save_text", io_ops.save_text, _perms(io_ops.save_text, {"fs_write"}))
 
-    # --------------- Research (left-panel narration/progress) ---------------
-    tr.register(
-        "research.plan",
-        research_ops.deep_thinking_plan,  # DSL expects research.plan
-        getattr(research_ops.deep_thinking_plan, "required_permissions", set()),
-    )
-    tr.register(
-        "research.parallel_search",
-        research_ops.parallel_search,
-        getattr(research_ops.parallel_search, "required_permissions", set()),
-    )
-    tr.register(
-        "research.read",
-        research_ops.read_url,
-        getattr(research_ops.read_url, "required_permissions", set()),
-    )
-    tr.register(
-        "image.search",
-        research_ops.image_search,  # offline-safe fixture images
-        getattr(research_ops.image_search, "required_permissions", {"fs_write", "fs_read"}),
-    )
+    # Research
+    tr.register("research.plan",            research_ops.deep_thinking_plan, _perms(research_ops.deep_thinking_plan, {"fs_write"}))
+    tr.register("research.parallel_search", research_ops.parallel_search,    _perms(research_ops.parallel_search,    {"fs_write"}))
+    tr.register("research.read_url",        research_ops.read_url,           _perms(research_ops.read_url,           {"fs_write"}))
+    tr.register("research.image_search",    research_ops.image_search,       _perms(research_ops.image_search,       {"fs_write","fs_read"}))
 
-    # --------------- Slides ---------------
-    # Outline
-    tr.register(
-        "slides.outline.from_prompt_stub",
-        slides_ops.outline_from_prompt_stub,
-        getattr(slides_ops.outline_from_prompt_stub, "required_permissions", set()),
-    )
-    tr.register(
-        "slides.outline.from_doc",
-        slides_ops.outline_from_doc,
-        getattr(slides_ops.outline_from_doc, "required_permissions", set()),
-    )
+    # Slides (outline)
+    tr.register("slides.outline.from_prompt_stub", slides_ops.outline_from_prompt_stub, _perms(slides_ops.outline_from_prompt_stub, set()))
+    tr.register("slides.outline.from_doc",         slides_ops.outline_from_doc,         _perms(slides_ops.outline_from_doc,         set()))
 
-    # HTML render (one HTML file per slide)
-    tr.register(
-        "slides.html.render",
-        slides_ops.render_html,  # or slides_ops.html_render (alias)
-        getattr(slides_ops.render_html, "required_permissions", {"fs_write", "fs_read"}),
-    )
+    # Slides (stateful renderer + partial update)
+    tr.register("slides.html.render", slides_stateful_ops.html_render, _perms(slides_stateful_ops.html_render, {"fs_write","fs_read"}))
+    tr.register("slides.update_one",  slides_stateful_ops.update_one,  _perms(slides_stateful_ops.update_one,  {"fs_write","fs_read"}))
 
-    # Exports (PDF stub-or-real; PPTX real builder; HTML exports)
-    tr.register(
-        "slides.export.pdf",
-        slides_ops.export_pdf,
-        getattr(slides_ops.export_pdf, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "slides.export.pptx_stub",
-        slides_ops.export_pptx_stub,
-        getattr(slides_ops.export_pptx_stub, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "slides.pptx.build",
-        slides_ops.build_pptx,
-        getattr(slides_ops.build_pptx, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "slides.export.pdf_via_lo",
-        slides_ops.export_pdf_via_lo,
-        getattr(slides_ops.export_pdf_via_lo, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "slides.export.html_via_lo",
-        slides_ops.export_html_via_lo,
-        getattr(slides_ops.export_html_via_lo, "required_permissions", {"fs_write"}),
-    )
-    tr.register(
-        "slides.export.html5_zip",
-        slides_ops.export_html5_zip,
-        getattr(slides_ops.export_html5_zip, "required_permissions", {"fs_write"}),
-    )
+    # Slides (index/link)  ← NEW
+    tr.register("slides.index.render", slides_index_ops.render_index, _perms(slides_index_ops.render_index, {"fs_write","fs_read"}))
 
-    # ---------------- Docs ----------------
-    tr.register("doc.detect_type", doc_ops.detect_type, set())
-    tr.register("doc.parse_txt", doc_ops.parse_txt, {"fs_read"})
-    tr.register("doc.parse_docx", doc_ops.parse_docx, {"fs_read"})
+    # PPTX & exports
+    tr.register("slides.pptx.build",         slides_ops.build_pptx,         _perms(slides_ops.build_pptx,         {"fs_write"}))
+    tr.register("slides.export.pdf_via_lo",  slides_ops.export_pdf_via_lo,  _perms(slides_ops.export_pdf_via_lo,  {"fs_write"}))
+    tr.register("slides.export.html_via_lo", slides_ops.export_html_via_lo, _perms(slides_ops.export_html_via_lo, {"fs_write"}))
+    tr.register("slides.export.html5_zip",   slides_ops.export_html5_zip,   _perms(slides_ops.export_html5_zip,   {"fs_write"}))
 
-    # --------------- Vision fixtures ---------------
-    tr.register(
-        "vision.images.from_fixtures",
-        vision_ops.from_fixtures,
-        getattr(vision_ops.from_fixtures, "required_permissions", {"fs_write"}),
-    )
+    # Docs
+    tr.register("doc.detect_type", doc_ops.detect_type, _perms(doc_ops.detect_type, set()))
+    tr.register("doc.parse_txt",   doc_ops.parse_txt,   _perms(doc_ops.parse_txt,   {"fs_read"}))
+    tr.register("doc.parse_docx",  doc_ops.parse_docx,  _perms(doc_ops.parse_docx,  {"fs_read"}))
+
+    # Vision fixtures
+    vision_fixtures_fn = _pick(vision_ops, "images_from_fixtures", "from_fixtures")
+    tr.register("vision.images.from_fixtures", vision_fixtures_fn, _perms(vision_fixtures_fn, {"fs_write","fs_read"}))
+
+    # Utility
+    tr.register("echo", echo_ops.echo, _perms(echo_ops.echo, set()))
 
     return tr
+
+# from __future__ import annotations
+
+# from .toolrouter import ToolRouter
+
+# # Ops modules
+# from .ops import io as io_ops
+# from .ops import slides as slides_ops
+# from .ops import doc as doc_ops
+# from .ops import vision as vision_ops
+# from .ops import research as research_ops
+# from .ops import echo as echo_ops
+
+# from .ops import slides_stateful as slides_stateful_ops
+
+
+
+# def _perms(fn, default):
+#     return getattr(fn, "required_permissions", default)
+
+
+# def _pick(module, *names):
+#     """
+#     Return the first attribute that exists on module from names.
+#     Raises AttributeError if none found.
+#     """
+#     for n in names:
+#         fn = getattr(module, n, None)
+#         if fn is not None:
+#             return fn
+#     raise AttributeError(f"{module.__name__} missing one of {names!r}")
+
+
+# def build_toolrouter() -> ToolRouter:
+#     tr = ToolRouter()
+
+#     # ---------------- IO ----------------
+#     tr.register("io.fetch", io_ops.fetch, _perms(io_ops.fetch, {"fs_write"}))
+#     tr.register("io.save_text", io_ops.save_text, _perms(io_ops.save_text, {"fs_write"}))
+
+#     # --------------- Research (narration / todos / search / read / images) ---------------
+#     tr.register("research.plan",
+#                 research_ops.deep_thinking_plan,
+#                 _perms(research_ops.deep_thinking_plan, {"fs_write"}))
+#     tr.register("research.parallel_search",
+#                 research_ops.parallel_search,
+#                 _perms(research_ops.parallel_search, {"fs_write"}))
+#     tr.register("research.read_url",
+#                 research_ops.read_url,
+#                 _perms(research_ops.read_url, {"fs_write"}))
+#     tr.register("research.image_search",
+#                 research_ops.image_search,
+#                 _perms(research_ops.image_search, {"fs_write", "fs_read"}))
+
+#     # ---------------- Slides ----------------
+#     # Outline
+#     tr.register("slides.outline.from_prompt_stub",
+#                 slides_ops.outline_from_prompt_stub,
+#                 _perms(slides_ops.outline_from_prompt_stub, set()))
+#     tr.register("slides.outline.from_doc",
+#                 slides_ops.outline_from_doc,
+#                 _perms(slides_ops.outline_from_doc, set()))
+
+#     # HTML render (writes artifacts/.../slides/NNN.html)
+#     # Pick compatible function name (repos vary between html_render vs render_html).
+#     slides_html_render_fn = _pick(slides_ops, "html_render", "render_html")
+
+#     # Replace previous slides.html.render registration with this one:
+#     tr.register(
+#         "slides.html.render",
+#         slides_stateful_ops.html_render,
+#         getattr(slides_stateful_ops.html_render, "required_permissions", {"fs_write","fs_read"}),
+#     )
+
+#     tr.register(
+#     "slides.update_one",
+#     slides_stateful_ops.update_one,
+#     getattr(slides_stateful_ops.update_one, "required_permissions", {"fs_write","fs_read"}),
+#     )
+
+
+
+#     # PPTX + exports (real paths with LO fallbacks)
+#     tr.register("slides.pptx.build",
+#                 slides_ops.build_pptx,
+#                 _perms(slides_ops.build_pptx, {"fs_write"}))
+#     tr.register("slides.export.pdf_via_lo",
+#                 slides_ops.export_pdf_via_lo,
+#                 _perms(slides_ops.export_pdf_via_lo, {"fs_write"}))
+#     tr.register("slides.export.html_via_lo",
+#                 slides_ops.export_html_via_lo,
+#                 _perms(slides_ops.export_html_via_lo, {"fs_write"}))
+#     tr.register("slides.export.html5_zip",
+#                 slides_ops.export_html5_zip,
+#                 _perms(slides_ops.export_html5_zip, {"fs_write"}))
+
+#     # ---------------- Docs ----------------
+#     tr.register("doc.detect_type", doc_ops.detect_type, _perms(doc_ops.detect_type, set()))
+#     tr.register("doc.parse_txt",   doc_ops.parse_txt,   _perms(doc_ops.parse_txt, {"fs_read"}))
+#     tr.register("doc.parse_docx",  doc_ops.parse_docx,  _perms(doc_ops.parse_docx, {"fs_read"}))
+
+#     # --------------- Vision fixtures ---------------
+#     # Pick compatible fixture function name.
+#     vision_fixtures_fn = _pick(vision_ops, "images_from_fixtures", "from_fixtures")
+#     tr.register("vision.images.from_fixtures",
+#                 vision_fixtures_fn,
+#                 _perms(vision_fixtures_fn, {"fs_write", "fs_read"}))
+
+#     # ---------------- Utility ----------------
+#     tr.register("echo", echo_ops.echo, _perms(echo_ops.echo, set()))
+
+#     # NOTE: we will register 'slides.update_one' after we add state.json + templates.
+#     return tr
+
+
+
+
+
+# # src/app/kernel/bootstrap_toolrouter.py
+# from __future__ import annotations
+
+# from .toolrouter import ToolRouter
+
+# # --- built-in ops
+# from .ops import io as io_ops
+# from .ops import slides as slides_ops
+# from .ops import doc as doc_ops
+# from .ops import vision as vision_ops
+# from .ops import research as research_ops  # ⟵ NEW: wire research stubs
+
+
+# def build_toolrouter() -> ToolRouter:
+#     tr = ToolRouter()
+
+#     # ---------------- IO ----------------
+#     tr.register(
+#         "io.fetch",
+#         io_ops.fetch,
+#         getattr(io_ops.fetch, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "io.save_text",
+#         io_ops.save_text,
+#         getattr(io_ops.save_text, "required_permissions", {"fs_write"}),
+#     )
+
+#     # --------------- Research (left-panel narration/progress) ---------------
+#     tr.register(
+#         "research.plan",
+#         research_ops.deep_thinking_plan,  # DSL expects research.plan
+#         getattr(research_ops.deep_thinking_plan, "required_permissions", set()),
+#     )
+#     tr.register(
+#         "research.parallel_search",
+#         research_ops.parallel_search,
+#         getattr(research_ops.parallel_search, "required_permissions", set()),
+#     )
+#     tr.register(
+#         "research.read",
+#         research_ops.read_url,
+#         getattr(research_ops.read_url, "required_permissions", set()),
+#     )
+#     tr.register(
+#         "image.search",
+#         research_ops.image_search,  # offline-safe fixture images
+#         getattr(research_ops.image_search, "required_permissions", {"fs_write", "fs_read"}),
+#     )
+
+#     # --------------- Slides ---------------
+#     # Outline
+#     tr.register(
+#         "slides.outline.from_prompt_stub",
+#         slides_ops.outline_from_prompt_stub,
+#         getattr(slides_ops.outline_from_prompt_stub, "required_permissions", set()),
+#     )
+#     tr.register(
+#         "slides.outline.from_doc",
+#         slides_ops.outline_from_doc,
+#         getattr(slides_ops.outline_from_doc, "required_permissions", set()),
+#     )
+
+#     # HTML render (one HTML file per slide)
+#     tr.register(
+#         "slides.html.render",
+#         slides_ops.render_html,  # or slides_ops.html_render (alias)
+#         getattr(slides_ops.render_html, "required_permissions", {"fs_write", "fs_read"}),
+#     )
+
+#     # Exports (PDF stub-or-real; PPTX real builder; HTML exports)
+#     tr.register(
+#         "slides.export.pdf",
+#         slides_ops.export_pdf,
+#         getattr(slides_ops.export_pdf, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "slides.export.pptx_stub",
+#         slides_ops.export_pptx_stub,
+#         getattr(slides_ops.export_pptx_stub, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "slides.pptx.build",
+#         slides_ops.build_pptx,
+#         getattr(slides_ops.build_pptx, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "slides.export.pdf_via_lo",
+#         slides_ops.export_pdf_via_lo,
+#         getattr(slides_ops.export_pdf_via_lo, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "slides.export.html_via_lo",
+#         slides_ops.export_html_via_lo,
+#         getattr(slides_ops.export_html_via_lo, "required_permissions", {"fs_write"}),
+#     )
+#     tr.register(
+#         "slides.export.html5_zip",
+#         slides_ops.export_html5_zip,
+#         getattr(slides_ops.export_html5_zip, "required_permissions", {"fs_write"}),
+#     )
+
+#     # ---------------- Docs ----------------
+#     tr.register("doc.detect_type", doc_ops.detect_type, set())
+#     tr.register("doc.parse_txt", doc_ops.parse_txt, {"fs_read"})
+#     tr.register("doc.parse_docx", doc_ops.parse_docx, {"fs_read"})
+
+#     # --------------- Vision fixtures ---------------
+#     tr.register(
+#         "vision.images.from_fixtures",
+#         vision_ops.from_fixtures,
+#         getattr(vision_ops.from_fixtures, "required_permissions", {"fs_write"}),
+#     )
+
+#     return tr
+
+
+
+
 
 # # src/app/kernel/bootstrap_toolrouter.py
 # from __future__ import annotations
