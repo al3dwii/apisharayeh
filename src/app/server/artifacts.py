@@ -1,4 +1,6 @@
+# /Users/omair/apisharayeh/src/app/server/artifacts.py
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any
@@ -7,6 +9,7 @@ import time
 
 _TITLE_RE = re.compile(r'<h1[^>]*class="[^"]*\btitle\b[^"]*"[^>]*>(.*?)</h1>', re.IGNORECASE | re.DOTALL)
 
+
 @dataclass
 class SlideItem:
     no: int
@@ -14,6 +17,7 @@ class SlideItem:
     path: str       # absolute FS path
     url: str        # public URL (under /artifacts)
     mtime: float
+
 
 def _read_title(html_path: Path) -> str:
     try:
@@ -27,14 +31,21 @@ def _read_title(html_path: Path) -> str:
     except Exception:
         return html_path.stem
 
+
 def list_project_artifacts(artifacts_root: Path, project_id: str) -> Dict[str, Any]:
     """
     Returns a JSON-serializable dict with slides and export info.
+    Looks for:
+      - slides/*.html
+      - export/presentation.pdf
+      - export/presentation.html5.zip
+      - export/presentation.pptx
     """
     project_dir = artifacts_root / project_id
     slides_dir = project_dir / "slides"
     export_dir = project_dir / "export"
 
+    # --------- Slides ----------
     slides: List[SlideItem] = []
     if slides_dir.exists():
         for p in sorted(slides_dir.glob("*.html")):
@@ -51,13 +62,29 @@ def list_project_artifacts(artifacts_root: Path, project_id: str) -> Dict[str, A
         # stable sort by "no"
         slides.sort(key=lambda s: s.no or 0)
 
+    # --------- Exports ----------
     pdf_url = ""
     pdf_path = ""
+    html_zip_url = ""
+    html_zip_path = ""
+    pptx_url = ""
+    pptx_path = ""
+
     if export_dir.exists():
         pdf = export_dir / "presentation.pdf"
         if pdf.exists():
             pdf_url = f"/artifacts/{project_id}/export/{pdf.name}"
             pdf_path = str(pdf)
+
+        html_zip = export_dir / "presentation.html5.zip"
+        if html_zip.exists():
+            html_zip_url = f"/artifacts/{project_id}/export/{html_zip.name}"
+            html_zip_path = str(html_zip)
+
+        pptx = export_dir / "presentation.pptx"
+        if pptx.exists():
+            pptx_url = f"/artifacts/{project_id}/export/{pptx.name}"
+            pptx_path = str(pptx)
 
     return {
         "project_id": project_id,
@@ -73,9 +100,15 @@ def list_project_artifacts(artifacts_root: Path, project_id: str) -> Dict[str, A
         "exports": {
             "pdf_url": pdf_url,
             "pdf_path": pdf_path,
+            "html_zip_url": html_zip_url,
+            "html_zip_path": html_zip_path,
+            "pptx_url": pptx_url,
+            "pptx_path": pptx_path,
         },
         "counts": {
             "slides": len(slides),
             "has_pdf": bool(pdf_url),
+            "has_html": bool(html_zip_url),
+            "has_pptx": bool(pptx_url),
         }
     }

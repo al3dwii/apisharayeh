@@ -1,7 +1,8 @@
+# /Users/omair/apisharayeh/plugins/slides.generate/manifest.yaml
 id: slides.generate
 name: "Slides: Generate"
 version: "0.1.0"
-summary: "Generate HTML slides and a PDF from a DOCX or a prompt."
+summary: "Generate HTML slides, PPTX, and a PDF from a DOCX or a prompt."
 
 # schema expects these as strings
 runtime: dsl
@@ -45,6 +46,10 @@ outputs:
     type: array
     items: { type: string }
   pdf_url:
+    type: string
+  html_zip_url:
+    type: string
+  pptx_url:
     type: string
 
 events:
