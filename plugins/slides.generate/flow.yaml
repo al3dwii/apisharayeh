@@ -4,6 +4,8 @@ version: 1
 vars:
   project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
   slides_count: "{{ inputs.slides_count | default(12) }}"
+  # NEW: prefer topic -> prompt -> fallback
+  topic_effective: "{{ inputs.topic or inputs.prompt or 'عرض تقديمي تجريبي' }}"
   queries: "{{ inputs.images_query_pack | default(['موضوع','أدوات','فوائد','تحديات']) }}"
 
 steps:
@@ -50,21 +52,21 @@ steps:
             out:
               outline: "@outline"
 
-      # From prompt
+      # From prompt/topic (explicit)
       "inputs.source == 'prompt'":
         run: slides.outline.from_prompt_stub
         in:
-          topic: "{{ inputs.topic }}"
+          topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
         out:
           outline: "@outline"
 
-      # Fallback (anything else / empty)
+      # Fallback (also handles when 'source' is omitted but prompt/topic provided)
       "true":
         run: slides.outline.from_prompt_stub
         in:
-          topic: "{{ inputs.topic | default('عرض تقديمي تجريبي') }}"
+          topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
         out:
@@ -77,7 +79,7 @@ steps:
       "{{ not @outline }}":
         run: slides.outline.from_prompt_stub
         in:
-          topic: "عرض فارغ"
+          topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
         out:
@@ -113,17 +115,43 @@ steps:
     out:
       slides_html: "@slides_html"
 
-  # 5) Export PDF -> artifacts/<project_id>/export/presentation.pdf
-  - id: export_pdf
-    run: slides.export.pdf
+  # 5) Build PPTX -> artifacts/<project_id>/export/presentation.pptx
+  - id: build_pptx
+    run: slides.pptx.build
     needs: [render]
     in:
       project_id: "{{ vars.project_id }}"
-      slides_html: "@slides_html"
+      outline: "@outline"
+      # IMPORTANT: use dict-indexing for the title
+      title: "{{ (@outline and @outline[0]['title']) or vars.topic_effective }}"
+      language: "{{ inputs.language | default('ar') }}"
+    out:
+      pptx_url: "@pptx_url"
+      pptx_path: "@pptx_path"
+
+  # 6) Export PDF via LibreOffice -> artifacts/<project_id>/export/presentation.pdf
+  - id: export_pdf
+    run: slides.export.pdf_via_lo
+    needs: [build_pptx]
+    in:
+      project_id: "{{ vars.project_id }}"
+      pptx_path: "@pptx_path"
     out:
       pdf_url: "@pdf_url"
+
+  # 7) Export HTML5 (zipped) via LibreOffice -> artifacts/<project_id>/export/presentation.html5.zip
+  - id: export_html
+    run: slides.export.html_via_lo
+    needs: [build_pptx]
+    in:
+      project_id: "{{ vars.project_id }}"
+      pptx_path: "@pptx_path"
+    out:
+      html_zip_url: "@html_zip_url"
 
 outputs:
   outline: "@outline"
   slides_html: "@slides_html"
   pdf_url: "@pdf_url"
+  html_zip_url: "@html_zip_url"
+  pptx_url: "@pptx_url"

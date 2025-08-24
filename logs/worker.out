@@ -1,43 +1,56 @@
+[dev-worker] environment
+  PYTHONPATH=src:
+  DATABASE_URL=postgresql+asyncpg://agentic:agentic@localhost:5432/agentic
+  REDIS_URL_QUEUE=redis://localhost:6379/2
+  PLUGINS_DIR=./plugins
+  ARTIFACTS_DIR=./artifacts
+  SOFFICE_BIN=/Applications/LibreOffice.app/Contents/MacOS/soffice
+
+[worker] python OK, path entries: 7
+[worker] import app: OK
  
- -------------- celery@worker-1755989221 v5.4.0 (opalescent)
+ -------------- celery@Omairs-MacBook-Pro.local v5.4.0 (opalescent)
 --- ***** ----- 
--- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-24 01:47:05
+-- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-24 11:20:09
 - *** --- * --- 
 - ** ---------- [config]
-- ** ---------- .> app:         agentic:0x1041a65d0
+- ** ---------- .> app:         agentic:0x1108f3050
 - ** ---------- .> transport:   redis://localhost:6379/2
 - ** ---------- .> results:     redis://localhost:6379/2
-- *** --- * --- .> concurrency: 10 (prefork)
+- *** --- * --- .> concurrency: 1 (prefork)
 -- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
 --- ***** ----- 
  -------------- [queues]
-                .> celery           exchange=celery(direct) key=celery
-                .> jobs             exchange=jobs(direct) key=jobs
+                .> cpu              exchange=cpu(direct) key=cpu
+                .> default          exchange=default(direct) key=default
+                .> io               exchange=io(direct) key=io
+                .> llm              exchange=llm(direct) key=llm
 
 [tasks]
   . deliver_webhook
   . execute_service_job
-  . maintenance.gc_artifacts
-  . maintenance.reap_stuck_jobs
-  . maintenance.sync_heartbeats_from_events
 
-[2025-08-24 01:47:06,024: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-24 11:20:09,979: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-24 01:47:06,039: INFO/MainProcess] Connected to redis://localhost:6379/2
-[2025-08-24 01:47:06,040: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-24 11:20:09,991: INFO/MainProcess] Connected to redis://localhost:6379/2
+[2025-08-24 11:20:09,991: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-24 01:47:06,044: INFO/MainProcess] mingle: searching for neighbors
-[2025-08-24 01:47:07,054: INFO/MainProcess] mingle: all alone
-[2025-08-24 01:47:07,076: INFO/MainProcess] celery@worker-1755989221 ready.
-[2025-08-24 01:47:07,078: INFO/MainProcess] Task execute_service_job[e0ba0ea2-a6cf-41bc-84f4-60b3f4094362] received
-[2025-08-24 01:47:07,081: INFO/MainProcess] Task execute_service_job[7566ea63-3907-46ea-9aff-8beaf6f9cd8e] received
-[2025-08-24 01:47:07,274: INFO/ForkPoolWorker-8] Task execute_service_job[e0ba0ea2-a6cf-41bc-84f4-60b3f4094362] succeeded in 0.19415645813569427s: None
-[2025-08-24 01:47:07,274: INFO/ForkPoolWorker-1] Task execute_service_job[7566ea63-3907-46ea-9aff-8beaf6f9cd8e] succeeded in 0.19179691700264812s: None
+[2025-08-24 11:20:09,994: INFO/MainProcess] mingle: searching for neighbors
+[2025-08-24 11:20:11,021: INFO/MainProcess] mingle: all alone
+[2025-08-24 11:20:11,041: INFO/MainProcess] celery@Omairs-MacBook-Pro.local ready.
+[2025-08-24 11:20:12,643: INFO/MainProcess] Task execute_service_job[57c7467e-4f6d-4b8a-be85-41acbb55bd4f] received
+[2025-08-24 11:22:32,700: INFO/ForkPoolWorker-1] Task execute_service_job[57c7467e-4f6d-4b8a-be85-41acbb55bd4f] succeeded in 140.0555639998056s: None
+
+worker: Warm shutdown (MainProcess)
+
+worker: Hitting Ctrl+C again will terminate all running tasks!
+
+worker: Warm shutdown (MainProcess)
