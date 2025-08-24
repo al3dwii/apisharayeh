@@ -1,0 +1,11 @@
+retry: 5000
+
+event: step
+data: {"event": "step", "data": {"name": "service.start", "status": "started", "service_id": "slides.generate", "env": {"SOFFICE_BIN": "/Applications/LibreOffice.app/Contents/MacOS/soffice"}}}
+
+event: step
+data: {"event": "step", "data": {"name": "artifact.ready", "status": "info", "artifact": "/artifacts/prj_58d1faf5/export/presentation.pdf"}}
+
+event: step
+data: {"event": "step", "data": {"name": "service.end", "status": "succeeded", "outline": [{"no": 1, "kind": "/Users/omair/apisharayeh/cover", "title": "/Users/omair/apisharayeh/Quick intro to AI in education", "subtitle": null, "bullets": [], "image": null}, {"no": 2, "kind": "/Users/omair/apisharayeh/index", "title": "/Users/omair/apisharayeh/فهرس المحتوى", "subtitle": null, "bullets": [], "image": null}, {"no": 3, "kind": "/Users/omair/apisharayeh/content", "title": "/Users/omair/apisharayeh/ما هو Quick intro to AI in education", "subtitle": null, "bullets": [], "image": null}, {"no": 4, "kind": "/Users/omair/apisharayeh/list", "title": "/Users/omair/apisharayeh/الأنواع / التصنيفات", "subtitle": null, "bullets": ["/Users/omair/apisharayeh/متزامن / غير متزامن", "/Users/omair/apisharayeh/مدمج", "/Users/omair/apisharayeh/التفاعلي"], "image": null}, {"no": 5, "kind": "/Users/omair/apisharayeh/content", "title": "/Users/omair/apisharayeh/المنصات والأدوات", "subtitle": null, "bullets": [], "image": null}, {"no": 6, "kind": "/Users/omair/apisharayeh/list", "title": "/Users/omair/apisharayeh/الفوائد والمزايا", "subtitle": null, "bullets": ["/Users/omair/apisharayeh/مرونة الوقت والمكان", "/Users/omair/apisharayeh/توفير التكاليف", "/Users/omair/apisharayeh/تتبع الأداء"], "image": null}], "slides_html": ["/artifacts/prj_58d1faf5/slides/001.html", "/artifacts/prj_58d1faf5/slides/002.html", "/artifacts/prj_58d1faf5/slides/003.html", "/artifacts/prj_58d1faf5/slides/004.html", "/artifacts/prj_58d1faf5/slides/005.html", "/artifacts/prj_58d1faf5/slides/006.html"], "pdf_url": "/artifacts/prj_58d1faf5/export/presentation.pdf", "html_zip_url": "/artifacts/prj_58d1faf5/export/presentation.html5.zip", "pptx_url": "/artifacts/prj_58d1faf5/export/presentation.pptx"}}
+

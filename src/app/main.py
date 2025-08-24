@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+
 from app.core.config import settings
 from app.core.metrics import MetricsMiddleware, metrics_app
 from app.core.observability import setup_otel
@@ -20,6 +21,9 @@ from app.api.v1 import jobs, events
 from app.api.v1.services import router as services_router
 from app.kernel.plugins.loader import registry as plugin_registry, start_watcher
 from app.services.registry_store import sync_all_from_loader
+
+from app.api.routes.slides import router as slides_router  # ⟵ add this
+
 
 app = FastAPI(title="Agentic Backend", version="1.0.0")
 
@@ -59,6 +63,8 @@ async def health():
 app.include_router(jobs.router,     prefix="/v1", tags=["jobs"])
 app.include_router(events.router,   prefix="/v1", tags=["events"])
 app.include_router(services_router, prefix="/v1", tags=["services"])
+app.include_router(slides_router)  
+
 
 
 # ---- Startup ----
