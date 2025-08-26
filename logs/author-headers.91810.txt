@@ -1,6 +1,0 @@
-HTTP/1.1 404 Not Found
-date: Sun, 24 Aug 2025 19:17:46 GMT
-server: uvicorn
-content-length: 22
-content-type: application/json
-

@@ -11,10 +11,10 @@
  
  -------------- celery@Omairs-MacBook-Pro.local v5.4.0 (opalescent)
 --- ***** ----- 
--- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-24 22:17:45
+-- ******* ---- macOS-14.5-arm64-arm-64bit 2025-08-26 14:13:55
 - *** --- * --- 
 - ** ---------- [config]
-- ** ---------- .> app:         agentic:0x105482ed0
+- ** ---------- .> app:         agentic:0x103ad28d0
 - ** ---------- .> transport:   redis://localhost:6379/2
 - ** ---------- .> results:     redis://localhost:6379/2
 - *** --- * --- .> concurrency: 1 (prefork)
@@ -30,21 +30,57 @@
   . deliver_webhook
   . execute_service_job
 
-[2025-08-24 22:17:45,187: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-26 14:13:55,170: WARNING/MainProcess] /Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-24 22:17:45,203: INFO/MainProcess] Connected to redis://localhost:6379/2
-[2025-08-24 22:17:45,204: WARNING/MainProcess] /Users/omair/apisharayeh/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+[2025-08-26 14:13:55,187: INFO/MainProcess] Connected to redis://localhost:6379/2
+[2025-08-26 14:13:55,188: WARNING/MainProcess] /Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py:508: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
 whether broker connection retries are made during startup in Celery 6.0 and above.
 If you wish to retain the existing behavior for retrying connections on startup,
 you should set broker_connection_retry_on_startup to True.
   warnings.warn(
 
-[2025-08-24 22:17:45,207: INFO/MainProcess] mingle: searching for neighbors
-[2025-08-24 22:17:46,218: INFO/MainProcess] mingle: all alone
-[2025-08-24 22:17:46,240: INFO/MainProcess] celery@Omairs-MacBook-Pro.local ready.
-[2025-08-24 22:17:47,802: INFO/MainProcess] Task execute_service_job[6009dd95-2e3b-450c-9a5c-e362ebe3a757] received
-[2025-08-24 22:18:14,046: INFO/ForkPoolWorker-1] Task execute_service_job[6009dd95-2e3b-450c-9a5c-e362ebe3a757] succeeded in 26.242679375223815s: None
+[2025-08-26 14:13:55,194: INFO/MainProcess] mingle: searching for neighbors
+[2025-08-26 14:13:56,205: INFO/MainProcess] mingle: all alone
+[2025-08-26 14:13:56,222: INFO/MainProcess] celery@Omairs-MacBook-Pro.local ready.
+[2025-08-26 14:14:05,243: INFO/MainProcess] Task execute_service_job[00a968dc-6661-4492-9ce7-e83cc58df815] received
+[2025-08-26 14:15:05,697: INFO/ForkPoolWorker-1] Task execute_service_job[00a968dc-6661-4492-9ce7-e83cc58df815] succeeded in 60.451870874967426s: None
+
+worker: Hitting Ctrl+C again will terminate all running tasks!
+[2025-08-26 14:35:23,665: CRITICAL/MainProcess] Unrecoverable error: RuntimeError("reentrant call inside <_io.BufferedWriter name='<stdout>'>")
+Traceback (most recent call last):
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/worker.py", line 202, in start
+    self.blueprint.start(self)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/bootsteps.py", line 116, in start
+    step.start(parent)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/bootsteps.py", line 365, in start
+    return self.obj.start()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py", line 340, in start
+    blueprint.start(self)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/bootsteps.py", line 116, in start
+    step.start(parent)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/consumer/consumer.py", line 746, in start
+    c.loop(*c.loop_args())
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/worker/loops.py", line 97, in asynloop
+    next(loop)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/kombu/asynchronous/hub.py", line 317, in create_loop
+    events = poll(poll_timeout)
+             ^^^^^^^^^^^^^^^^^^
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/kombu/utils/eventio.py", line 216, in poll
+    event_list = self._quick_poll(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/apps/worker.py", line 288, in _handle_request
+    callback(worker)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/apps/worker.py", line 320, in on_SIGINT
+    safe_say('worker: Hitting Ctrl+C again will terminate all running tasks!',
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/apps/worker.py", line 81, in safe_say
+    print(f'\n{msg}', file=f, flush=True)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/apps/worker.py", line 289, in _handle_request
+    safe_say(f'worker: {how} shutdown (MainProcess)', sys.__stdout__)
+  File "/Users/omair/O2/.venv/lib/python3.12/site-packages/celery/apps/worker.py", line 81, in safe_say
+    print(f'\n{msg}', file=f, flush=True)
+RuntimeError: reentrant call inside <_io.BufferedWriter name='<stdout>'>

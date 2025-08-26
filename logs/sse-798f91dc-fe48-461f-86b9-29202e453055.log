@@ -1,0 +1,13 @@
+retry: 5000
+
+event: step
+data: {"event": "step", "data": {"name": "service.start", "status": "started", "service_id": "slides.generate", "env": {"SOFFICE_BIN": "/Applications/LibreOffice.app/Contents/MacOS/soffice"}}}
+
+event: step
+data: {"event": "step", "data": {"name": "artifact.ready", "status": "info", "artifact": "/artifacts/prj_69b6f395/export/presentation.pdf"}}
+
+event: step
+data: {"event": "step", "data": {"name": "service.end", "status": "succeeded", "outline": [{"no": 1, "kind": "/Users/omair/O2/cover", "title": "/Users/omair/O2/Quick intro to AI in education", "subtitle": null, "bullets": [], "image": null}, {"no": 2, "kind": "/Users/omair/O2/index", "title": "/Users/omair/O2/فهرس المحتوى", "subtitle": null, "bullets": [], "image": null}, {"no": 3, "kind": "/Users/omair/O2/content", "title": "/Users/omair/O2/ما هو Quick intro to AI in education", "subtitle": null, "bullets": [], "image": null}, {"no": 4, "kind": "/Users/omair/O2/list", "title": "/Users/omair/O2/الأنواع / التصنيفات", "subtitle": null, "bullets": ["/Users/omair/O2/متزامن / غير متزامن", "/Users/omair/O2/مدمج", "/Users/omair/O2/التفاعلي"], "image": null}, {"no": 5, "kind": "/Users/omair/O2/content", "title": "/Users/omair/O2/المنصات والأدوات", "subtitle": null, "bullets": [], "image": null}, {"no": 6, "kind": "/Users/omair/O2/list", "title": "/Users/omair/O2/الفوائد والمزايا", "subtitle": null, "bullets": ["/Users/omair/O2/مرونة الوقت والمكان", "/Users/omair/O2/توفير التكاليف", "/Users/omair/O2/تتبع الأداء"], "image": null}], "slides_html": ["/artifacts/prj_69b6f395/slides/001.html", "/artifacts/prj_69b6f395/slides/002.html", "/artifacts/prj_69b6f395/slides/003.html", "/artifacts/prj_69b6f395/slides/004.html", "/artifacts/prj_69b6f395/slides/005.html", "/artifacts/prj_69b6f395/slides/006.html"], "pdf_url": "/artifacts/prj_69b6f395/export/presentation.pdf", "html_zip_url": "/artifacts/prj_69b6f395/export/presentation.html5.zip", "pptx_url": "/artifacts/prj_69b6f395/export/presentation.pptx"}}
+
+: keep-alive
+
