@@ -29,3 +29,31 @@ build/
 *.pid
 
 *.logs
+# local env & caches
+.venv/
+.env
+*.env
+.env.*
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+
+# OS/editor
+.DS_Store
+*.swp
+
+# generated/runtime
+artifacts/
+logs/
+nohup.out
+celerybeat-schedule.db
+pg_data/
+redis_data/
+caddy_data/
+caddy_config/
+*.pdf
+*.pptx
+*.docx
+*.db
+*.out
+*.pid
