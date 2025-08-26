@@ -57,3 +57,6 @@ caddy_config/
 *.db
 *.out
 *.pid
+
+# keep env template
+!.env.example
