@@ -1,78 +1,50 @@
-# plugins/slides.generate/flow.yaml
 version: 1
-
 vars:
   project_id: "{{ inputs.project_id | default(random_id('prj_')) }}"
   slides_count: "{{ inputs.slides_count | default(12) }}"
-  # NEW: prefer topic -> prompt -> fallback
   topic_effective: "{{ inputs.topic or inputs.prompt or 'عرض تقديمي تجريبي' }}"
   queries: "{{ inputs.images_query_pack | default(['موضوع','أدوات','فوائد','تحديات']) }}"
-
 steps:
-
-  # 1) Build an outline (DOCX or prompt), with a guaranteed fallback
   - id: source_branch
     run: switch
     when:
-
-      # From DOCX
       "inputs.source == 'docx'":
         run: sequence
         do:
           - id: fetch_docx
             run: io.fetch
-            in:
-              # MUST be file://... when DEV_OFFLINE=true
-              url: "{{ inputs.docx_url }}"
-              # NOTE: this is relative to the project root; don't prefix project_id here
-              to_dir: "input"
-            out:
-              path: "@docx_path"
-
+            in: { url: "{{ inputs.docx_url }}", to_dir: "input" }
+            out: { path: "@docx_path" }
           - id: detect_type
             run: doc.detect_type
-            in:
-              path: "@docx_path"
-            out:
-              kind: "@doc_kind"
-
+            in: { path: "@docx_path" }
+            out: { kind: "@doc_kind" }
           - id: parse_docx
             run: doc.parse_docx
-            in:
-              path: "@docx_path"
-            out:
-              text: "@doc_text"
-
+            in: { path: "@docx_path" }
+            out: { text: "@doc_text" }
           - id: outline_from_doc
             run: slides.outline.from_doc
             in:
               text: "@doc_text"
               language: "{{ inputs.language | default('ar') }}"
               count: "{{ vars.slides_count }}"
-            out:
-              outline: "@outline"
-
-      # From prompt/topic (explicit)
+            out: { outline: "@outline" }
       "inputs.source == 'prompt'":
         run: slides.outline.from_prompt_stub
         in:
           topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
-        out:
-          outline: "@outline"
-
-      # Fallback (also handles when 'source' is omitted but prompt/topic provided)
+        out: { outline: "@outline" }
       "true":
         run: slides.outline.from_prompt_stub
         in:
           topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
-        out:
-          outline: "@outline"
+        out: { outline: "@outline" }
 
-  # 2) Final safety net to ensure an outline exists
   - id: ensure_outline
     run: switch
     when:
@@ -82,28 +54,20 @@ steps:
           topic: "{{ vars.topic_effective }}"
           language: "{{ inputs.language | default('ar') }}"
           count: "{{ vars.slides_count }}"
-        out:
-          outline: "@outline"
+        out: { outline: "@outline" }
       "true":
         run: io.save_text
-        in:
-          text: "ok"
-          to_dir: "tmp"
-          filename: "noop.txt"
-        out:
-          path: "@noop"
+        in: { text: "ok", to_dir: "tmp", filename: "noop.txt" }
+        out: { path: "@noop" }
 
-  # 3) Deterministic placeholder images (offline-safe)
   - id: get_images
     run: vision.images.from_fixtures
     needs: [ensure_outline]
     in:
       project_id: "{{ vars.project_id }}"
       queries: "{{ vars.queries }}"
-    out:
-      images: "@images"
+    out: { images: "@images" }
 
-  # 4) Render HTML slides -> artifacts/<project_id>/slides/*.html
   - id: render
     run: slides.html.render
     needs: [ensure_outline, get_images]
@@ -112,42 +76,35 @@ steps:
       outline: "@outline"
       theme: "{{ inputs.theme | default('academic-ar') }}"
       images: "@images"
-    out:
-      slides_html: "@slides_html"
+    out: { slides_html: "@slides_html" }
 
-  # 5) Build PPTX -> artifacts/<project_id>/export/presentation.pptx
   - id: build_pptx
     run: slides.pptx.build
     needs: [render]
     in:
       project_id: "{{ vars.project_id }}"
       outline: "@outline"
-      # IMPORTANT: use dict-indexing for the title
       title: "{{ (@outline and @outline[0]['title']) or vars.topic_effective }}"
       language: "{{ inputs.language | default('ar') }}"
     out:
       pptx_url: "@pptx_url"
       pptx_path: "@pptx_path"
 
-  # 6) Export PDF via LibreOffice -> artifacts/<project_id>/export/presentation.pdf
   - id: export_pdf
     run: slides.export.pdf_via_lo
     needs: [build_pptx]
     in:
       project_id: "{{ vars.project_id }}"
       pptx_path: "@pptx_path"
-    out:
-      pdf_url: "@pdf_url"
+    out: { pdf_url: "@pdf_url" }
 
-  # 7) Export HTML5 (zipped) via LibreOffice -> artifacts/<project_id>/export/presentation.html5.zip
   - id: export_html
     run: slides.export.html_via_lo
     needs: [build_pptx]
     in:
       project_id: "{{ vars.project_id }}"
       pptx_path: "@pptx_path"
-    out:
-      html_zip_url: "@html_zip_url"
+    out: { html_zip_url: "@html_zip_url" }
 
 outputs:
   outline: "@outline"
