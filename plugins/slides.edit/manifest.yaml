@@ -1,0 +1,18 @@
+id: slides.edit
+name: "Slides: Edit"
+version: "0.1.5"
+runtime: dsl
+entrypoint: flow.json
+permissions:
+  fs_read: true
+  fs_write: true
+inputs:
+  type: object
+  properties:
+    project_id: { type: string }
+    slide_no:   { type: integer }
+    patch:      { type: object }   # may arrive as string; we normalize in code
+  required: [project_id, slide_no, patch]
+outputs:
+  url: { type: string }
+  state_url: { type: string }

@@ -1,10 +1,11 @@
 id: slides.generate
 name: "Slides: Generate"
-version: "0.1.3"
-summary: "Generate HTML slides, PPTX, and a PDF from a DOCX or a prompt."
+version: "0.1.4"                   # bump → forces reload
+summary: "Generate HTML slides, PPTX, PDF (from prompt or DOCX)."
 runtime: dsl
 entrypoint: flow.yaml
 permissions: { fs_read: true, fs_write: true }
+
 inputs:
   type: object
   properties:
@@ -12,17 +13,30 @@ inputs:
     source: { type: string, enum: ["docx","prompt"] }
     docx_url: { type: string }
     topic: { type: string }
+    prompt: { type: string }
     language: { type: string, default: "ar" }
     slides_count: { type: integer, minimum: 1, maximum: 50, default: 12 }
     theme: { type: string, default: "academic-ar" }
     images_query_pack:
       type: array
       items: { type: string }
+    export:
+      type: array
+      items: { type: string }
   required: []
+
 outputs:
-  outline: { type: array, items: { type: string } }
-  slides_html: { type: array, items: { type: string } }
+  outline:
+    type: array
+    items:
+      type: object           # ← outline is a list of slide objects
+  slides_html:
+    type: array
+    items: { type: string }
+  state_url: { type: string }  # ← add this
+  index_url: { type: string }  # ← and this
   pdf_url: { type: string }
   html_zip_url: { type: string }
   pptx_url: { type: string }
+
 events: { todos: [] }

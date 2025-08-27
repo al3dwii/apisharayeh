@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "id": "edit_one",
+      "run": "slides.update_one",
+      "in": {
+        "project_id": "{{ inputs.project_id }}",
+        "slide_no": "{{ (inputs.slide_no or 0) | int }}",
+        "patch": "{{ inputs.patch }}"
+      },
+      "out": {
+        "url": "@url",
+        "state_url": "@state_url"
+      }
+    }
+  ],
+  "outputs": {
+    "url": "@url",
+    "state_url": "@state_url"
+  }
+}

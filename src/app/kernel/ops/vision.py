@@ -83,7 +83,7 @@ def images_from_fixtures(ctx, queries: Iterable[str] | None = None, project_id: 
     project_id = project_id or ctx.project_id
 
     # Heuristic: enough images to cover most decks (37 for 4 queries)
-    total = max(12, min(6, len(queries) * 9 + 1))
+    total = max(3, min(3, len(queries) * 9 + 1))
     paths = _ensure_placeholders(ctx, total, project_id)
 
     # Emit a tool_used event for tracing

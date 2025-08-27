@@ -1,4 +1,6 @@
+# src/app/kernel/ops/slides_stateful.py
 from __future__ import annotations
+
 from typing import Any, Dict, List, Optional, Tuple
 import time
 import json
@@ -7,10 +9,107 @@ import posixpath  # POSIX-style paths in HTML
 
 from .slides_templates import render_by_template
 
-# ---- helpers ----
+
+# ────────────────────────────────────────────────────────────────────────────────
+# small utils
+# ────────────────────────────────────────────────────────────────────────────────
 
 def _now_ts() -> int:
     return int(time.time())
+
+def _s(maybe: Any) -> Optional[str]:
+    """Return a plain string for Path/URL-ish objects; None stays None."""
+    if maybe is None:
+        return None
+    if isinstance(maybe, Path):
+        return maybe.as_posix()
+    return str(maybe)
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# project / storage helpers
+# ────────────────────────────────────────────────────────────────────────────────
+
+def _project_base(ctx, project_id: str) -> Path:
+    """
+    Resolve the filesystem base for a given project.
+    Prefer ctx.storage.root; fallback to local ./artifacts/<project_id>.
+    """
+    storage = getattr(ctx, "storage", None)
+    if storage and getattr(storage, "root", None):
+        return Path(storage.root) / project_id
+    # last-resort fallback for dev
+    return Path("artifacts") / project_id
+
+def _state_candidates(ctx, project_id: str) -> List[Path]:
+    """
+    All plausible locations for state.json (first hit wins).
+    """
+    base = _project_base(ctx, project_id)
+    return [
+        base / "state.json",
+        base / "slides" / "state.json",
+    ]
+
+def _read_json_from(path: Path) -> Dict[str, Any]:
+    try:
+        if path.exists():
+            txt = path.read_text(encoding="utf-8")
+            if not txt:
+                return {}
+            return json.loads(txt)
+        return {}
+    except Exception:
+        return {}
+
+def _write_json_to(path: Path, obj: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(obj, ensure_ascii=False, indent=2)
+    path.write_text(payload, encoding="utf-8")
+
+def _state_read(ctx, project_id: str) -> Tuple[Dict[str, Any], Optional[Path]]:
+    """
+    Load state.json for a project. Returns (state, path_found_or_None).
+    """
+    for p in _state_candidates(ctx, project_id):
+        data = _read_json_from(p)
+        if data:
+            return data, p
+    # absolute last fallback: context-relative "state.json"
+    try:
+        txt = ctx.read_text("state.json")
+        data = json.loads(txt) if txt else {}
+        return data, None
+    except Exception:
+        return {}, None
+
+def _state_write(ctx, project_id: str, state: Dict[str, Any]) -> Tuple[Path, str]:
+    """
+    Persist state.json for project, return (fs_path, public_url).
+    """
+    # keep timestamps sane
+    now = _now_ts()
+    state["updated_at"] = now
+    if "created_at" not in state:
+        state["created_at"] = now
+    # ensure project_id inside state is set
+    if not state.get("project_id"):
+        state["project_id"] = project_id
+
+    fs_path = _project_base(ctx, project_id) / "state.json"
+    _write_json_to(fs_path, state)
+
+    try:
+        url = ctx.url_for(fs_path)
+    except Exception:
+        # map to project-rel path for url_for
+        url = ctx.url_for(Path(project_id) / "state.json")
+    return fs_path, _s(url) or f"/artifacts/{project_id}/state.json"
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# URL & image mapping
+# ────────────────────────────────────────────────────────────────────────────────
 
 def _as_url(ctx, maybe_path: Any) -> Optional[str]:
     """
@@ -18,14 +117,16 @@ def _as_url(ctx, maybe_path: Any) -> Optional[str]:
       - absolute http(s) URLs are returned as-is
       - '/artifacts/...' URLs are returned as-is
       - anything else is mapped via ctx.url_for (handles absolute FS & ctx-rel)
+    Always returns a string URL (never a Path) or None.
     """
     if not maybe_path:
         return None
-    s = str(maybe_path)
+    s = _s(maybe_path) or ""
     if s.startswith("http://") or s.startswith("https://") or s.startswith("/artifacts/"):
         return s
     try:
-        return ctx.url_for(Path(s))
+        mapped = ctx.url_for(Path(s))
+        return _s(mapped)
     except Exception:
         return None
 
@@ -39,9 +140,9 @@ def _to_project_rel(url_or_path: Optional[str], project_id: str) -> Optional[str
     """
     if not url_or_path:
         return None
-    s = str(url_or_path)
+    s = _s(url_or_path) or ""
 
-    # Don't normalize absolute external URLs to project-rel
+    # Don't normalize external URLs to project-rel
     if "://" in s and not s.startswith("file://"):
         return None
 
@@ -62,15 +163,14 @@ def _to_project_rel(url_or_path: Optional[str], project_id: str) -> Optional[str
 def _img_src_for_template(ctx, project_id: str, raw: Any) -> Optional[str]:
     """
     Value for <img src="..."> inside slides/NNN.html.
-
-    If external (http/https): return as-is.
-    If inside the project: compute a path RELATIVE TO 'slides/' (../images/xxx).
+    External URLs are returned as-is; project-local paths become '../images/...'
     """
     url = _as_url(ctx, raw)
     if not url:
         return None
+    url = _s(url) or ""
     if url.startswith("http://") or url.startswith("https://"):
-        return url  # external image
+        return url  # external
 
     rel = _to_project_rel(url, project_id)  # e.g. images/foo.jpg
     if not rel:
@@ -80,60 +180,32 @@ def _img_src_for_template(ctx, project_id: str, raw: Any) -> Optional[str]:
     # Example: rel='images/foo.jpg' -> '../images/foo.jpg'
     return posixpath.relpath(rel, "slides")
 
-# --- JSON I/O shims (ExecutionContext doesn't have write_json/read_json) ---
 
-def _ctx_read_json(ctx, relpath: str) -> Dict[str, Any]:
-    try:
-        txt = ctx.read_text(relpath)
-    except FileNotFoundError:
-        return {}
-    except Exception:
-        return {}
-    if not txt:
-        return {}
-    try:
-        return json.loads(txt)
-    except Exception:
-        return {}
-
-def _ctx_write_json(ctx, relpath: str, obj: Dict[str, Any]) -> None:
-    payload = json.dumps(obj, ensure_ascii=False, indent=2)
-    ctx.write_text(relpath, payload)
-
-def _read_state(ctx) -> Dict[str, Any]:
-    return _ctx_read_json(ctx, "state.json") or {}
-
-def _write_state(ctx, state: Dict[str, Any]) -> None:
-    state["updated_at"] = _now_ts()
-    if "created_at" not in state:
-        state["created_at"] = state["updated_at"]
-    _ctx_write_json(ctx, "state.json", state)
-
-# ---- robust slide writing ----
+# ────────────────────────────────────────────────────────────────────────────────
+# slide HTML writing
+# ────────────────────────────────────────────────────────────────────────────────
 
 def _write_slide_file(ctx, project_id: str, filename: str, html: str) -> Tuple[Path, str]:
     """
     Write HTML into artifacts/<project_id>/slides/<filename>, ensuring the folder exists.
     Returns (fs_path, public_url)
     """
-    # storage.root points at the artifacts root
     storage = getattr(ctx, "storage", None)
     if not storage or not hasattr(storage, "root"):
-        # fallback: try context-relative write (may fail if parents absent)
-        fs_path = ctx.write_text(f"slides/{filename}", html)
-        return Path(fs_path), ctx.url_for(fs_path)
+        # fallback: try context-relative write (parents may not exist)
+        fs_rel = Path(project_id) / "slides" / filename
+        ctx.write_text(fs_rel.as_posix(), html)  # type: ignore[arg-type]
+        return fs_rel, _s(ctx.url_for(fs_rel)) or f"/artifacts/{project_id}/slides/{filename}"
 
     base = Path(storage.root) / project_id / "slides"
     base.mkdir(parents=True, exist_ok=True)
     fs_path = base / filename
     fs_path.write_text(html, encoding="utf-8")
-    # url_for accepts either a rel path under the project or an absolute path
     try:
         url = ctx.url_for(fs_path)
     except Exception:
-        # fallback to a project-relative path to be mapped by url_for
         url = ctx.url_for(Path(project_id) / "slides" / filename)
-    return fs_path, url
+    return fs_path, _s(url) or f"/artifacts/{project_id}/slides/{filename}"
 
 def _render_one(ctx, project_id: str, slide: Dict[str, Any], lang: str) -> Tuple[str, str]:
     """
@@ -144,19 +216,25 @@ def _render_one(ctx, project_id: str, slide: Dict[str, Any], lang: str) -> Tuple
     html = render_by_template(slide, lang, img_src)
     filename = f"{slide['no']:03}.html"
     fs_path, url = _write_slide_file(ctx, project_id, filename, html)
-    # Optional: emit a debug event so you can see writes in the SSE stream
     try:
-        ctx.emit("debug", {"type":"slide_written", "file": f"slides/{filename}"})
+        ctx.emit("debug", {"type": "slide_written", "file": f"slides/{filename}"})
     except Exception:
         pass
-    return (str(fs_path), url)
+    return (_s(fs_path) or str(fs_path), _s(url) or str(url))
 
-# ---- public ops ----
 
-def html_render(ctx, project_id: str, outline: List[Dict[str, Any]],
-                theme: str = "academic-ar",
-                images: Optional[List[Any]] = None,
-                language: str = "ar") -> Dict[str, Any]:
+# ────────────────────────────────────────────────────────────────────────────────
+# public ops
+# ────────────────────────────────────────────────────────────────────────────────
+
+def html_render(
+    ctx,
+    project_id: str,
+    outline: List[Dict[str, Any]],
+    theme: str = "academic-ar",
+    images: Optional[List[Any]] = None,
+    language: str = "ar",
+) -> Dict[str, Any]:
     """
     Builds slides HTML, writes state.json as the canonical deck state,
     and emits slide_generated events with template & URLs.
@@ -185,35 +263,41 @@ def html_render(ctx, project_id: str, outline: List[Dict[str, Any]],
             "subtitle": subtitle,
             "bullets": bullets,
             "image": img_rel,   # store project-relative (templates will make it ../images/..)
-            "notes": src.get("notes", "")
+            "notes": (src.get("notes") or src.get("note") or ""),
         })
 
     # Full state.json
     title0 = (slides_state[0]["title"] if slides_state else "Presentation")
     state = {
-        "project_id": project_id,
+        "project_id": project_id,               # << ensure populated
         "language": language or "ar",
+        "theme": theme or "academic-ar",
         "title": title0,
         "slides": slides_state,
         "created_at": _now_ts(),
         "updated_at": _now_ts(),
     }
-    _write_state(ctx, state)
+
+    state_fs, state_url = _state_write(ctx, project_id, state)
+    try:
+        ctx.emit("debug", {"type": "state_written", "path": _s(state_fs), "url": state_url})
+    except Exception:
+        pass
 
     # Render each slide and emit events
     slides_urls: List[str] = []
     for slide in slides_state:
-        fs_path, url = _render_one(ctx, project_id, slide, state["language"])
-        slides_urls.append(url)
+        _fs_path, url = _render_one(ctx, project_id, slide, state["language"])
+        slides_urls.append(_s(url) or url)
         try:
             ctx.emit("partial", {
                 "type": "slide_generated",
                 "no": slide["no"],
                 "template": slide["template"],
                 "title": slide["title"],
-                "path": url,
-                "code_path": url,
-                "preview_url": url
+                "path": _s(url) or url,
+                "code_path": _s(url) or url,
+                "preview_url": _s(url) or url,
             })
         except Exception:
             pass
@@ -221,210 +305,65 @@ def html_render(ctx, project_id: str, outline: List[Dict[str, Any]],
     return {
         "slides_html": slides_urls,
         "count": len(slides_urls),
-        "state_url": ctx.url_for("state.json"),
+        "state_url": state_url,
     }
 
 # Permissions expected by ToolRouter
 html_render.required_permissions = {"fs_write", "fs_read"}
+
 
 def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Dict[str, Any]:
     """
     Patch slide N in state.json then re-render only that slide.
     patch may include: title, subtitle, bullets, image, template, notes
     """
-    state = _read_state(ctx)
+    state, state_path = _state_read(ctx, project_id)
     slides = state.get("slides") or []
-    slide = next((s for s in slides if int(s.get("no", -1)) == int(slide_no)), None)
+
+    # Robust coercion: sometimes slide_no comes as str (from YAML)
+    try:
+        target_no = int(slide_no)
+    except Exception:
+        target_no = int(str(slide_no).strip() or "0")
+
+    slide = next((s for s in slides if int(s.get("no", -1)) == target_no), None)
     if not slide:
         from ..errors import ProblemDetails
         raise ProblemDetails(title="Not found", detail=f"slide {slide_no}", code="E_NOT_FOUND", status=404)
 
     # Apply patch; normalize image to project-relative if provided
-    for k in ("title", "subtitle", "bullets", "template", "notes"):
-        if k in patch and patch[k] is not None:
-            slide[k] = patch[k]
-    if "image" in patch and patch["image"] is not None:
-        rel = _to_project_rel(_as_url(ctx, patch["image"]), project_id)
-        slide["image"] = rel
+    if isinstance(patch, dict):
+        for k in ("title", "subtitle", "bullets", "template", "notes"):
+            if k in patch and patch[k] is not None:
+                slide[k] = patch[k]
+        # Back-compat: allow 'note' in patch to set 'notes'
+        if "note" in patch and patch["note"] is not None:
+            slide["notes"] = patch["note"]
+        if "image" in patch and patch["image"] is not None:
+            rel = _to_project_rel(_as_url(ctx, patch["image"]), project_id)
+            slide["image"] = rel
 
-    _write_state(ctx, state)
+    # Persist state back where we found it (or canonical location)
+    state_fs, state_url = _state_write(ctx, project_id, state)
 
-    # Re-render one
+    # Re-render just this slide
     lang = state.get("language", "ar")
     fs_path, url = _render_one(ctx, project_id, slide, lang)
 
     try:
-        ctx.emit("partial", {"type": "slide_updated", "no": int(slide_no), "path": url})
+        ctx.emit("partial", {
+            "type": "slide_updated",
+            "no": target_no,
+            "path": _s(url) or url,
+            "state_url": state_url,
+        })
     except Exception:
         pass
-    return {"path": fs_path, "url": url, "state_url": ctx.url_for("state.json")}
+
+    return {
+        "path": _s(fs_path) or fs_path,
+        "url": _s(url) or url,
+        "state_url": state_url,
+    }
 
 update_one.required_permissions = {"fs_write", "fs_read"}
-
-# from __future__ import annotations
-# from typing import Any, Dict, List, Optional, Tuple
-# from pathlib import Path
-# import time
-# import json
-
-# from .slides_templates import render_by_template
-
-# # ---- helpers ----
-
-# def _now_ts() -> int:
-#     return int(time.time())
-
-# def _as_url(ctx, maybe_path: Any) -> Optional[str]:
-#     """
-#     Accepts a path returned by other ops (str/Path) and returns a static URL
-#     via ctx.url_for. Returns None if input is falsy.
-#     """
-#     if not maybe_path:
-#         return None
-#     try:
-#         return ctx.url_for(maybe_path)
-#     except Exception:
-#         s = str(maybe_path)
-#         return s if s.startswith("/") or s.startswith("http") else None
-
-# # --- JSON I/O shims (ExecutionContext doesn't have write_json/read_json) ---
-
-# def _ctx_read_json(ctx, relpath: str) -> Dict[str, Any]:
-#     try:
-#         txt = ctx.read_text(relpath)
-#     except FileNotFoundError:
-#         return {}
-#     except Exception:
-#         # If the file exists but can't be read, treat as empty state (defensive)
-#         return {}
-#     if not txt:
-#         return {}
-#     try:
-#         return json.loads(txt)
-#     except Exception:
-#         return {}
-
-# def _ctx_write_json(ctx, relpath: str, obj: Dict[str, Any]) -> None:
-#     payload = json.dumps(obj, ensure_ascii=False, indent=2)
-#     ctx.write_text(relpath, payload)
-
-# def _read_state(ctx) -> Dict[str, Any]:
-#     return _ctx_read_json(ctx, "state.json") or {}
-
-# def _write_state(ctx, state: Dict[str, Any]) -> None:
-#     state["updated_at"] = _now_ts()
-#     if "created_at" not in state:
-#         state["created_at"] = state["updated_at"]
-#     _ctx_write_json(ctx, "state.json", state)
-
-# def _render_one(ctx, slide: Dict[str, Any], lang: str, image_url: Optional[str]) -> Tuple[str, str]:
-#     """
-#     Renders a single slide dict into slides/NNN.html.
-#     Returns (filesystem_path_str, static_url_str)
-#     """
-#     html = render_by_template(slide, lang, image_url)
-#     filename = f"{slide['no']:03}.html"
-#     fs_path = ctx.write_text(f"slides/{filename}", html)  # returns path-like
-#     url = ctx.url_for(fs_path)
-#     return (str(fs_path), url)
-
-# # ---- public ops ----
-
-# def html_render(ctx, project_id: str, outline: List[Dict[str, Any]],
-#                 theme: str = "academic-ar",
-#                 images: Optional[List[Any]] = None,
-#                 language: str = "ar") -> Dict[str, Any]:
-#     """
-#     Builds slides HTML, writes state.json as the canonical deck state,
-#     and emits slide_generated events with template & URLs.
-#     Signature mirrors existing 'slides.html.render' callsites.
-#     """
-#     # Prepare images: turn any paths into URLs; we'll store URL in state for FE.
-#     img_urls = [u for u in (_as_url(ctx, p) for p in (images or [])) if u] or []
-
-#     # Compose state from outline
-#     slides_state: List[Dict[str, Any]] = []
-#     for idx, src in enumerate(outline or [], start=1):
-#         template = (src.get("template") or src.get("kind") or ("cover" if idx == 1 else "text_image_right"))
-#         title = src.get("title") or f"Slide {idx}"
-#         subtitle = src.get("subtitle") or ""
-#         bullets = src.get("bullets") or []
-#         img_url = img_urls[(idx - 1) % len(img_urls)] if img_urls else None
-
-#         slides_state.append({
-#             "no": idx,
-#             "template": template,
-#             "title": title,
-#             "subtitle": subtitle,
-#             "bullets": bullets,
-#             "image": img_url,   # store URL (served statically)
-#             "notes": src.get("notes", "")
-#         })
-
-#     # Full state.json
-#     title0 = (slides_state[0]["title"] if slides_state else "Presentation")
-#     state = {
-#         "project_id": project_id,
-#         "language": language or "ar",
-#         "title": title0,
-#         "slides": slides_state,
-#         "created_at": _now_ts(),
-#         "updated_at": _now_ts(),
-#     }
-#     _write_state(ctx, state)
-
-#     # Render each slide and emit events
-#     slides_urls: List[str] = []
-#     for slide in slides_state:
-#         fs_path, url = _render_one(ctx, slide, state["language"], slide.get("image"))
-#         slides_urls.append(url)
-#         ctx.emit("partial", {
-#             "type": "slide_generated",
-#             "no": slide["no"],
-#             "template": slide["template"],
-#             "title": slide["title"],
-#             "path": url,
-#             "code_path": url,
-#             "preview_url": url
-#         })
-
-#     # Return mirror of previous renderer contract
-#     return {
-#         "slides_html": slides_urls,
-#         "count": len(slides_urls),
-#         "state_url": ctx.url_for("state.json"),
-#     }
-
-# # Permissions expected by ToolRouter
-# html_render.required_permissions = {"fs_write", "fs_read"}
-
-# def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Dict[str, Any]:
-#     """
-#     Patch slide N in state.json then re-render only that slide.
-#     patch may include: title, subtitle, bullets, image, template, notes
-#     """
-#     state = _read_state(ctx)
-#     slides = state.get("slides") or []
-#     slide = next((s for s in slides if int(s.get("no", -1)) == int(slide_no)), None)
-#     if not slide:
-#         from ..errors import ProblemDetails  # lazy import to avoid hard dep at import time
-#         raise ProblemDetails(title="Not found", detail=f"slide {slide_no}", code="E_NOT_FOUND", status=404)
-
-#     # Apply patch
-#     for k in ("title", "subtitle", "bullets", "image", "template", "notes"):
-#         if k in patch and patch[k] is not None:
-#             slide[k] = patch[k]
-
-#     _write_state(ctx, state)
-
-#     # Re-render one
-#     lang = state.get("language", "ar")
-#     img_url = slide.get("image")
-#     fs_path, url = _render_one(ctx, slide, lang, img_url)
-
-#     # Emit update event
-#     ctx.emit("partial", {"type": "slide_updated", "no": int(slide_no), "path": url})
-
-#     return {"path": fs_path, "url": url, "state_url": ctx.url_for("state.json")}
-
-# update_one.required_permissions = {"fs_write", "fs_read"}
