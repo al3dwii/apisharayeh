@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.core.config import settings
 from app.server.plugins import list_plugins, get_plugin
 from app.server.jobs import JobStore
 from app.kernel.service_runner import ServiceRunner
@@ -19,13 +20,11 @@ from app.kernel.errors import ProblemDetails
 from app.server.validation import extract_schema, validate_inputs_against_schema
 from app.server.artifacts import list_project_artifacts
 from app.server.uploads import save_upload
-
 # PATCH endpoint router (slides.update_one)
 from app.server.routes_edit import router as edit_router
 
-
-PLUGINS_ROOT = Path(os.environ.get("PLUGINS_DIR", "./plugins")).resolve()
-ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "./artifacts")).resolve()
+PLUGINS_ROOT = Path(settings.PLUGINS_DIR).expanduser().resolve()
+ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR).expanduser().resolve()
 
 app = FastAPI(title="Kernel Local API", version="0.1.0")
 

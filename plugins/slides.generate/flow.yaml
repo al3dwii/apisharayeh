@@ -68,15 +68,19 @@ steps:
       queries: "{{ vars.queries }}"
     out: { images: "@images" }
 
+  # IMPORTANT: this writes <ARTIFACTS_DIR>/<project_id>/state.json and returns @state_url
   - id: render
     run: slides.html.render
     needs: [ensure_outline, get_images]
     in:
       project_id: "{{ vars.project_id }}"
       outline: "@outline"
+      language: "{{ inputs.language | default('ar') }}"
       theme: "{{ inputs.theme | default('academic-ar') }}"
       images: "@images"
-    out: { slides_html: "@slides_html" }
+    out:
+      state_url: "@state_url"
+      slides_html: "@slides_html"
 
   - id: build_pptx
     run: slides.pptx.build
@@ -108,6 +112,7 @@ steps:
 
 outputs:
   outline: "@outline"
+  state_url: "@state_url"
   slides_html: "@slides_html"
   pdf_url: "@pdf_url"
   html_zip_url: "@html_zip_url"
