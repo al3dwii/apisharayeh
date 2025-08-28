@@ -1,0 +1,38 @@
+# docker-compose.override.yml (place at repo root)
+services:
+  # Stub out base services that try to pull private images
+  app:
+    image: busybox:1.36
+    command: ["sh","-lc","echo 'stub app (API runs on host)'; sleep 3600"]
+
+  migrate:
+    image: busybox:1.36
+    command: ["true"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: src/infra/worker.Dockerfile
+    image: o2-worker:dev
+    environment:
+      PYTHONPATH: "/app/src:"
+      SOFFICE_BIN: "/usr/bin/soffice"
+      # use in-cluster services
+      DATABASE_URL: "postgresql+asyncpg://agentic:agentic@db:5432/agentic"
+      REDIS_URL_QUEUE: "redis://redis:6379/2"
+      PLUGINS_DIR: "/app/plugins"
+      ARTIFACTS_DIR: "/app/artifacts"
+      SERVICE_FLAGS: "*"
+    volumes:
+      - ./src:/app/src:ro
+      - ./plugins:/app/plugins:ro
+      - ./artifacts:/app/artifacts
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    command: >-
+      bash -lc "python -m pip install --no-cache-dir -r /app/src/requirements.txt &&
+                celery -A app.workers.celery_app worker -Q default,io,llm,cpu --loglevel=INFO"

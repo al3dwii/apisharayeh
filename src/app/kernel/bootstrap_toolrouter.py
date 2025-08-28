@@ -1,3 +1,4 @@
+# src/app/kernel/bootstrap_toolrouter.py
 from __future__ import annotations
 
 from .toolrouter import ToolRouter
@@ -11,6 +12,9 @@ from .ops import doc as doc_ops
 from .ops import vision as vision_ops
 from .ops import research as research_ops
 from .ops import echo as echo_ops
+
+# M8 exports (LibreOffice/FFmpeg helpers)
+from app.kernel.ops import slides_export  # new module providing export_pdf/html_zip/media_thumbnail
 
 # Optional helper module (may not exist in some trees)
 try:
@@ -81,11 +85,22 @@ def build_toolrouter() -> ToolRouter:
     # Slides (index/link)
     tr.register("slides.index.render", slides_index_ops.render_index, _perms(slides_index_ops.render_index, {"fs_write", "fs_read"}))
 
-    # PPTX & exports
-    tr.register("slides.pptx.build",         slides_ops.build_pptx,         _perms(slides_ops.build_pptx,         {"fs_write"}))
-    tr.register("slides.export.pdf_via_lo",  slides_ops.export_pdf_via_lo,  _perms(slides_ops.export_pdf_via_lo,  {"fs_write"}))
-    tr.register("slides.export.html_via_lo", slides_ops.export_html_via_lo, _perms(slides_ops.export_html_via_lo, {"fs_write"}))
-    tr.register("slides.export.html5_zip",   slides_ops.export_html5_zip,   _perms(slides_ops.export_html5_zip,   {"fs_write"}))
+    # PPTX (builder in legacy slides.ops)
+    tr.register("slides.pptx.build", slides_ops.build_pptx, _perms(slides_ops.build_pptx, {"fs_write"}))
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Exports (old names for back-compat in some flows)
+    # ──────────────────────────────────────────────────────────────────────────────
+    _maybe_register(tr, "slides.export.pdf_via_lo",  slides_ops, "export_pdf_via_lo",  {"fs_write"})
+    _maybe_register(tr, "slides.export.html_via_lo", slides_ops, "export_html_via_lo", {"fs_write"})
+    _maybe_register(tr, "slides.export.html5_zip",   slides_ops, "export_html5_zip",   {"fs_write"})
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Exports (new M8 hardened ops backed by export_runtime.py)
+    # ──────────────────────────────────────────────────────────────────────────────
+    tr.register("slides.export.pdf",      slides_export.export_pdf,      _perms(slides_export.export_pdf,      {"fs_read", "fs_write"}))
+    tr.register("slides.export.html_zip", slides_export.export_html_zip, _perms(slides_export.export_html_zip, {"fs_read", "fs_write"}))
+    tr.register("media.thumb",            slides_export.media_thumbnail, _perms(slides_export.media_thumbnail, {"fs_read", "fs_write"}))
 
     # Docs
     tr.register("doc.detect_type", doc_ops.detect_type, _perms(doc_ops.detect_type, set()))

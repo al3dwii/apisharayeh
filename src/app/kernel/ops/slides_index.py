@@ -106,30 +106,58 @@ def _build_html(project_id: str, slide_files: List[str], title: str = "العر�
 
 def render_index(ctx, project_id: str, title: str | None = None) -> Dict[str, Any]:
     """
-    Generate slides/index.html that links to numbered slide HTML files and
-    supports ←/→ navigation. Emits artifact.ready {kind:'link'}.
+    Generate slides/index.html (viewer) and a root alias index.html that
+    redirects to it. Returns both URLs; keeps old keys for back-compat.
     """
-    base = ctx.artifacts_dir()  # artifacts/<project_id>
+    base: Path = ctx.artifacts_dir()  # artifacts/<project_id>
     slides_dir = base / "slides"
+    slides_dir.mkdir(parents=True, exist_ok=True)
+
+    # list numbered slide files
     slides = _list_numbered(slides_dir)
-    # Title: use provided or derive from state.json if present
+
+    # title: from state.json when available
     deck_title = title or project_id
     state_path = base / "state.json"
     if state_path.exists():
-      try:
-        state = ctx.read_json(state_path)  # optional helper if available
-        deck_title = (state or {}).get("title") or deck_title
-      except Exception:
+        try:
+            state = ctx.read_json(state_path)  # optional helper if available
+            deck_title = (state or {}).get("title") or deck_title
+        except Exception:
+            pass
+
+    # 1) write the viewer at slides/index.html
+    html_text = _build_html(project_id, slides, deck_title)
+    slides_index_path = ctx.write_text("slides/index.html", html_text)
+    slides_index_url = ctx.url_for(slides_index_path)
+
+    # 2) write root alias that redirects to slides/index.html
+    alias_html = """<!doctype html>
+<html lang="en"><meta charset="utf-8">
+<meta http-equiv="refresh" content="0; URL=slides/index.html">
+<link rel="canonical" href="slides/index.html">
+<title>Opening slides…</title>
+<body><p>Opening <a href="slides/index.html">slides/index.html</a>…</p></body>
+</html>"""
+    alias_path = ctx.write_text("index.html", alias_html)
+    index_url = ctx.url_for(alias_path)
+
+    # emit artifacts (best-effort)
+    try:
+        ctx.emit("artifact.ready", {"kind": "link", "url": slides_index_url})
+        ctx.emit("artifact.ready", {"kind": "link", "url": index_url})
+    except Exception:
         pass
 
-    html_text = _build_html(project_id, slides, deck_title)
-    out_path = ctx.write_text("slides/index.html", html_text)
-    url = ctx.url_for(out_path)
-    ctx.emit("artifact.ready", {"kind": "link", "url": url})
-    return {"url": url, "path": str(out_path)}
+    # new contract (index_url) + back-compat (url)
+    return {
+        "index_url": index_url,
+        "slides_index_url": slides_index_url,
+        "url": slides_index_url,           # back-compat with older callers
+        "path": str(slides_index_path),    # kept for diagnostics
+    }
 
-# permissions
-render_index.required_permissions = {"fs_read", "fs_write"}
+
 
 
 # from __future__ import annotations

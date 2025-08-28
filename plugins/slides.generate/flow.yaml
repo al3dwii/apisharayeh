@@ -94,8 +94,10 @@ steps:
       pptx_url: "@pptx_url"
       pptx_path: "@pptx_path"
 
+  # M8: conditional exports via LibreOffice runtime helpers
   - id: export_pdf
-    run: slides.export.pdf_via_lo
+    when: "{{ inputs.export and ('pdf' in inputs.export) }}"
+    run: slides.export.pdf
     needs: [build_pptx]
     in:
       project_id: "{{ vars.project_id }}"
@@ -103,12 +105,21 @@ steps:
     out: { pdf_url: "@pdf_url" }
 
   - id: export_html
-    run: slides.export.html_via_lo
+    when: "{{ inputs.export and ('html' in inputs.export) }}"
+    run: slides.export.html_zip
     needs: [build_pptx]
     in:
       project_id: "{{ vars.project_id }}"
       pptx_path: "@pptx_path"
     out: { html_zip_url: "@html_zip_url" }
+
+  # Project index page linking to exports & slides
+  - id: index
+    run: slides.index.render
+    needs: [render]
+    in:
+      project_id: "{{ vars.project_id }}"
+    out: { index_url: "@index_url" }
 
 outputs:
   outline: "@outline"
@@ -117,3 +128,4 @@ outputs:
   pdf_url: "@pdf_url"
   html_zip_url: "@html_zip_url"
   pptx_url: "@pptx_url"
+  index_url: "@index_url"
