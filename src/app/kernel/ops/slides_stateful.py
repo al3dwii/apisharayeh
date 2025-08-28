@@ -362,13 +362,12 @@ def html_render(
 # Permissions expected by ToolRouter
 html_render.required_permissions = {"fs_write", "fs_read"}
 
-
 def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Dict[str, Any]:
     """
     Patch slide N in state.json then re-render only that slide.
     patch may include: title, subtitle, bullets, image, template, notes
     """
-    state, state_path = _state_read(ctx, project_id)
+    state, _state_path = _state_read(ctx, project_id)
     slides = state.get("slides") or []
 
     # Robust coercion: sometimes slide_no comes as str (from YAML)
@@ -401,12 +400,14 @@ def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Di
     lang = state.get("language", "ar")
     fs_path, url = _render_one(ctx, project_id, slide, lang)
 
+    # Emit richer event including slide payload
     try:
         ctx.emit("partial", {
             "type": "slide_updated",
             "no": target_no,
             "path": _s(url) or url,
             "state_url": state_url,
+            "slide": slide,  # ← include the updated slide snapshot
         })  # type: ignore[attr-defined]
     except Exception:
         pass
@@ -415,9 +416,74 @@ def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Di
         "path": _s(fs_path) or fs_path,
         "url": _s(url) or url,
         "state_url": state_url,
+        "slide": slide,  # ← also return it in the op output
     }
 
 update_one.required_permissions = {"fs_write", "fs_read"}
+
+
+# def update_one(ctx, project_id: str, slide_no: int, patch: Dict[str, Any]) -> Dict[str, Any]:
+#     """
+#     Patch slide N in state.json then re-render only that slide.
+#     patch may include: title, subtitle, bullets, image, template, notes
+#     """
+#     state, state_path = _state_read(ctx, project_id)
+#     slides = state.get("slides") or []
+
+#     # Robust coercion: sometimes slide_no comes as str (from YAML)
+#     try:
+#         target_no = int(slide_no)
+#     except Exception:
+#         target_no = int(str(slide_no).strip() or "0")
+
+#     slide = next((s for s in slides if int(s.get("no", -1)) == target_no), None)
+#     if not slide:
+#         from ..errors import ProblemDetails
+#         raise ProblemDetails(title="Not found", detail=f"slide {slide_no}", code="E_NOT_FOUND", status=404)
+
+#     # Apply patch; normalize image to project-relative if provided
+#     if isinstance(patch, dict):
+#         for k in ("title", "subtitle", "bullets", "template", "notes"):
+#             if k in patch and patch[k] is not None:
+#                 slide[k] = patch[k]
+#         # Back-compat: allow 'note' in patch to set 'notes'
+#         if "note" in patch and patch["note"] is not None:
+#             slide["notes"] = patch["note"]
+#         if "image" in patch and patch["image"] is not None:
+#             rel = _to_project_rel(_as_url(ctx, patch["image"]), project_id)
+#             slide["image"] = rel
+
+#     # Persist state back where we found it (or canonical location)
+#     state_fs, state_url = _state_write(ctx, project_id, state)
+
+#     # Re-render just this slide
+#     lang = state.get("language", "ar")
+#     fs_path, url = _render_one(ctx, project_id, slide, lang)
+
+#     try:
+#         ctx.emit("partial", {
+#             "type": "slide_updated",
+#             "no": target_no,
+#             "path": _s(url) or url,
+#             "state_url": state_url,
+#         })  # type: ignore[attr-defined]
+#     except Exception:
+#         pass
+
+#     return {
+#         "path": _s(fs_path) or fs_path,
+#         "url": _s(url) or url,
+#         "state_url": state_url,
+#     }
+
+# update_one.required_permissions = {"fs_write", "fs_read"}
+
+
+
+
+
+
+
 
 # # src/app/kernel/ops/slides_stateful.py
 # from __future__ import annotations
