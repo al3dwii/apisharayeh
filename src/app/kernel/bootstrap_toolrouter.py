@@ -16,6 +16,9 @@ from .ops import echo as echo_ops
 # M8 exports (LibreOffice/FFmpeg helpers)
 from app.kernel.ops import slides_export  # new module providing export_pdf/html_zip/media_thumbnail
 
+from .ops import slides_citations as slides_citations_ops  # ← add
+
+
 # Optional helper module (may not exist in some trees)
 try:
     from .ops import slides_author_apply as slides_author_apply_ops  # provides apply_outline()
@@ -106,6 +109,10 @@ def build_toolrouter() -> ToolRouter:
     tr.register("doc.detect_type", doc_ops.detect_type, _perms(doc_ops.detect_type, set()))
     tr.register("doc.parse_txt",   doc_ops.parse_txt,   _perms(doc_ops.parse_txt,   {"fs_read"}))
     tr.register("doc.parse_docx",  doc_ops.parse_docx,  _perms(doc_ops.parse_docx,  {"fs_read"}))
+
+    tr.register("slides.citations.apply",
+                slides_citations_ops.apply_citations,
+                _perms(slides_citations_ops.apply_citations, {"fs_read", "fs_write"}))
 
     # Vision fixtures (supports either function name)
     vision_fixtures_fn = _pick(vision_ops, "images_from_fixtures", "from_fixtures")

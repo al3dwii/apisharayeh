@@ -1,15 +1,24 @@
+# src/app/core/safety.py
 from __future__ import annotations
-import ipaddress, socket, os, re, tempfile, contextlib
-from typing import Iterable, Optional, Tuple, Sequence
+
+import contextlib
+import ipaddress
+import os
+import re
+import socket
+import tempfile
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 from urllib.parse import urlparse
+
 import requests
 
-try:
-    import httpx  # optional; used by async fetch
+# httpx is optional; used only by async helper
+try:  # pragma: no cover
+    import httpx  # type: ignore
 except Exception:  # pragma: no cover
     httpx = None  # type: ignore
 
-# settings is optional; getattr with defaults so we don't require config patches
+# settings is optional; keep soft dependency with safe defaults
 try:
     from app.core.config import settings  # type: ignore
 except Exception:  # pragma: no cover
@@ -18,8 +27,13 @@ except Exception:  # pragma: no cover
         MAX_FETCH_BYTES = 25 * 1024 * 1024
         FETCH_TIMEOUT_SEC = 30
         MAX_UPLOAD_MB = 50
+
     settings = _S()  # type: ignore
 
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Network policy constants
+# ────────────────────────────────────────────────────────────────────────────────
 
 PRIVATE_NETS = [
     ipaddress.ip_network("127.0.0.0/8"),
@@ -34,6 +48,23 @@ PRIVATE_NETS = [
 ALLOWED_SCHEMES = {"http", "https"}
 ALLOWED_PORTS = {80, 443}
 
+# Realistic browser-like default headers to avoid simplistic bot/403 blocks.
+DEFAULT_HTTP_HEADERS: Dict[str, str] = {
+    "User-Agent": os.getenv(
+        "HTTP_USER_AGENT",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36",
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": os.getenv("HTTP_ACCEPT_LANGUAGE", "en-US,en;q=0.9"),
+    "Connection": "keep-alive",
+}
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Exceptions
+# ────────────────────────────────────────────────────────────────────────────────
 
 class FetchBlocked(Exception):
     """Raised when an outbound fetch is blocked by policy."""
@@ -45,7 +76,12 @@ class UploadBlocked(Exception):
     pass
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────────────────────
+
 def _resolve_all(host: str) -> Iterable[str]:
+    """Return all resolved IPs for host; empty on error."""
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
         for info in infos:
@@ -83,6 +119,14 @@ def _port_allowed(netloc: str) -> bool:
 
 
 def validate_url(url: str) -> None:
+    """
+    Validate that the URL is safe to fetch:
+      - scheme http/https
+      - (optional) host allowlist
+      - no embedded credentials
+      - default ports only
+      - DNS doesn't resolve to private/link-local ranges
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ALLOWED_SCHEMES:
         raise FetchBlocked(f"blocked: scheme {parsed.scheme} not allowed")
@@ -98,26 +142,43 @@ def validate_url(url: str) -> None:
             raise FetchBlocked(f"blocked: resolved to private IP ({ip})")
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+# Safe outbound fetch (sync/async)
+# ────────────────────────────────────────────────────────────────────────────────
+
 def safe_fetch_to_temp(
     url: str,
     *,
     max_bytes: Optional[int] = None,
     timeout: Optional[int] = None,
     allowed_content_types: Optional[Sequence[str]] = None,
+    headers: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, int, Optional[str]]:
     """
     Download a URL with SSRF protections and size cap.
-    Returns (temp_path, total_bytes, content_type). Raises FetchBlocked or requests.HTTPError.
+    Returns (temp_path, total_bytes, content_type).
+    Raises FetchBlocked or requests.HTTPError.
     """
     validate_url(url)
     max_bytes = max_bytes if max_bytes is not None else int(getattr(settings, "MAX_FETCH_BYTES", 25 * 1024 * 1024))
     timeout = timeout if timeout is not None else int(getattr(settings, "FETCH_TIMEOUT_SEC", 30))
 
-    with requests.get(url, stream=True, timeout=timeout, allow_redirects=True) as r:
+    merged_headers = dict(DEFAULT_HTTP_HEADERS)
+    if headers:
+        merged_headers.update(headers)
+
+    with requests.get(
+        url,
+        stream=True,
+        timeout=timeout,
+        allow_redirects=True,
+        headers=merged_headers,
+    ) as r:
         r.raise_for_status()
         ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip() or None
         if allowed_content_types and ctype and ctype not in allowed_content_types:
             raise FetchBlocked(f"blocked: content-type {ctype} not permitted")
+
         total = 0
         fd, tmp = tempfile.mkstemp()
         try:
@@ -142,21 +203,36 @@ async def async_safe_fetch_to_temp(
     max_bytes: Optional[int] = None,
     timeout: Optional[int] = None,
     allowed_content_types: Optional[Sequence[str]] = None,
+    headers: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, int, Optional[str]]:
+    """
+    Async variant using httpx when available; falls back to sync helper otherwise.
+    """
     if httpx is None:  # pragma: no cover
-        # fall back to sync version in thread if httpx isn't installed
-        return safe_fetch_to_temp(url, max_bytes=max_bytes, timeout=timeout, allowed_content_types=allowed_content_types)
+        # fall back to sync version in a thread if caller wants true async
+        return safe_fetch_to_temp(
+            url,
+            max_bytes=max_bytes,
+            timeout=timeout,
+            allowed_content_types=allowed_content_types,
+            headers=headers,
+        )
 
     validate_url(url)
     max_bytes = max_bytes if max_bytes is not None else int(getattr(settings, "MAX_FETCH_BYTES", 25 * 1024 * 1024))
     timeout = timeout if timeout is not None else int(getattr(settings, "FETCH_TIMEOUT_SEC", 30))
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+    merged_headers = dict(DEFAULT_HTTP_HEADERS)
+    if headers:
+        merged_headers.update(headers)
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=merged_headers) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip() or None
         if allowed_content_types and ctype and ctype not in allowed_content_types:
             raise FetchBlocked(f"blocked: content-type {ctype} not permitted")
+
         fd, tmp = tempfile.mkstemp()
         total = 0
         try:
@@ -175,14 +251,32 @@ async def async_safe_fetch_to_temp(
     return tmp, total, ctype
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+# Inbound upload validation
+# ────────────────────────────────────────────────────────────────────────────────
+
 _EXT_RE = re.compile(r"\.([A-Za-z0-9_-]{1,16})$")
 
 
-def validate_upload(filename: str, content_type: Optional[str], size_bytes: int,
-                    allowed_exts: Sequence[str] = (".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt", ".png", ".jpg", ".jpeg"),
-                    max_mb: Optional[int] = None) -> None:
+def validate_upload(
+    filename: str,
+    content_type: Optional[str],
+    size_bytes: int,
+    allowed_exts: Sequence[str] = (
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xlsx",
+        ".csv",
+        ".txt",
+        ".png",
+        ".jpg",
+        ".jpeg",
+    ),
+    max_mb: Optional[int] = None,
+) -> None:
     """
-    Basic inbound upload guard: extension allowlist + size cap + coarse content-type check.
+    Basic inbound upload guard: extension allowlist + size cap (+ coarse content-type sanity).
     """
     max_mb = max_mb if max_mb is not None else int(getattr(settings, "MAX_UPLOAD_MB", 50))
     if size_bytes > max_mb * 1024 * 1024:

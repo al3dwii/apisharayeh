@@ -1,29 +1,46 @@
 id: slides.author
 name: "Slides: Authoring"
-version: "0.1.0"
-summary: "Plan → research → build slides → live render → export."
+version: "0.1.2"
+summary: "Plan → outline → render → citations → index → export."
 runtime: dsl
-entrypoint: flow.yaml
+entrypoint: flow.json
 permissions:
   fs_read: true
   fs_write: true
+
 inputs:
   type: object
   properties:
-    project_id: { type: string }
-    source: { type: string, enum: ["docx","prompt"], default: "prompt" }
-    docx_url: { type: string }
-    topic: { type: string }
-    prompt: { type: string }
-    language: { type: string, default: "ar" }
+    project_id:   { type: string }
+    source:       { type: string, enum: ["docx","prompt"], default: "prompt" }
+    docx_url:     { type: string }
+    topic:        { type: string }
+    prompt:       { type: string }
+    language:     { type: string, default: "ar" }
     slides_count: { type: integer, default: 5, minimum: 1, maximum: 30 }
-    theme: { type: string, default: "academic-ar" }
+    theme:        { type: string, default: "academic-ar" }
+    images_query_pack:
+      type: array
+      items: { type: string }
+    # M13 knobs
+    use_research: { type: boolean, default: false }
+    urls:
+      type: array
+      items: { type: string }
+    export:
+      type: array
+      items: { type: string, enum: ["pdf","html"] }
   required: []
+
 outputs:
-  project_id: { type: string }
+  project_id:  { type: string }
+  state_url:   { type: string }
   slides_html:
     type: array
     items: { type: string }
-  pdf_url: { type: string }
-  pptx_url: { type: string }
-  html_zip_url: { type: string }
+  index_url:   { type: string }
+  pdf_url:     { type: string }
+  pptx_url:    { type: string }
+  html_zip_url:{ type: string }
+
+events: { todos: [] }
