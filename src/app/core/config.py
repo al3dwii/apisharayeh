@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_USER_PER_MIN: int = 120
     RATE_LIMIT_TENANT_PER_MIN: int = 240
 
+        # Speech / ASR / OCR providers
+    AZURE_SPEECH_KEY: Optional[str] = None
+    AZURE_SPEECH_REGION: Optional[str] = None
+    ASR_DEVICE: str = "auto"  # "cpu" | "cuda" | "auto"
+    PADDLE_OCR_BASE: Optional[str] = None
+
+
     # Optional S3 (unused in local)
     S3_ENDPOINT: Optional[str] = None
     S3_BUCKET: Optional[str] = None

@@ -28,6 +28,10 @@ from app.api.routes import routes_research
 
 from app.api.routes import slides_edit as slides_edit_routes
 
+from app.api.routes import uploads_media as uploads_media_router
+from app.api.v1.models import router as models_router
+
+
 
 app = FastAPI(title="Agentic Backend", version="1.0.0")
 
@@ -62,19 +66,22 @@ setup_otel(app)
 async def health():
     return JSONResponse({"ok": True, "env": settings.ENV})
 
-
 # ---- Routers ----
 app.include_router(jobs.router,     prefix="/v1", tags=["jobs"])
 app.include_router(events.router,   prefix="/v1", tags=["events"])
 app.include_router(services_router, prefix="/v1", tags=["services"])
-app.include_router(slides_router)  
-app.include_router(uploads_router)  
+app.include_router(slides_router)
+app.include_router(uploads_router)
 app.include_router(routes_research.router)
 app.include_router(slides_edit_routes.router)
 
+# ✅ Mount models under /v1 as well
+app.include_router(models_router, prefix="/v1")
+app.include_router(models_router)  # optional: keeps /models working
 
-
-
+# Media uploads: both /v1/uploads/media and /uploads/media
+app.include_router(uploads_media_router.router, prefix="/v1")
+app.include_router(uploads_media_router.router)
 
 # ---- Startup ----
 @app.on_event("startup")

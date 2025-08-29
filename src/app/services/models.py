@@ -1,6 +1,7 @@
 # app/services/models.py
-import os, yaml
-from typing import Any, Dict
+import importlib, os, yaml
+from typing import Any, Dict, Optional
+
 
 class ModelRouter:
     def __init__(self, cfg_path=os.getenv("MODELS_CONFIG", "config/models.yaml")):
@@ -46,28 +47,47 @@ class ModelRouter:
     def ocr(self, file_path: str, policy_ctx=None) -> dict:
         raise NotImplementedError
 
-# import os, yaml
-# from typing import Any, Dict
 
-# class ModelRouter:
-#     def __init__(self, cfg_path=os.getenv("MODELS_CONFIG", "config/models.yaml")):
-#         self.cfg = yaml.safe_load(open(cfg_path, "r", encoding="utf-8"))
+    def _use(self, family: str, meta: Dict[str, Any]) -> str:
+        # Apply simple rules like: target_lang == ar -> hf:nllb-200-3.3B
+        fam = self.cfg.get(family, {}) if isinstance(self.cfg, dict) else {}
+        rules = (fam or {}).get("rules", []) or []
+        for r in rules:
+            when = r.get("when", {})
+            if all(meta.get(k) == v for k,v in when.items()):
+                return r["use"]
+        return (fam or {}).get("default")
 
-#     # Stubs — call into your existing router(s)
-#     def chat(self, messages: list[dict], policy_ctx: Dict[str,Any]|None=None) -> dict:
-#         from app.services.llm_router import run_chat  # your helper
-#         content = "\n".join([m.get("content","") for m in messages if m.get("role")!="system"])
-#         return {"text": run_chat(content)}  # minimal glue
+    def _load_provider(self, key: str):
+        # map config key → provider class path
+        # asr: whisperx:large-v3 → app.services.providers.asr.whisperx_asr:FasterWhisperASR
+        m = {
+            "whisperx:large-v3": "app.services.providers.asr.whisperx_asr:FasterWhisperASR",
+            "azure:neural":      "app.services.providers.tts.azure_tts:AzureNeuralTTS",
+            "paddleocr:server":  "app.services.providers.ocr.paddle_client:PaddleOCRServer",
+        }
+        if key not in m: raise RuntimeError(f"No provider mapping for '{key}'")
+        mod, cls = m[key].split(":")
+        return getattr(importlib.import_module(mod), cls)
 
-#     def translate(self, text: str, source: str|None, target: str|None, policy_ctx=None) -> str:
-#         from app.services.llm_router import run_translate
-#         return run_translate(text, source, target)
+    # ---- ASR ----
+    def asr(self, wav_path: str, diarize: bool = True, policy_ctx: Optional[Dict[str,Any]] = None) -> Dict[str,Any]:
+        use = self._use("asr", policy_ctx or {})
+        Prov = self._load_provider(use)
+        try:
+            return Prov().transcribe(wav_path, diarize=diarize, lang=(policy_ctx or {}).get("lang"))
+        except Exception as e:
+            # simple fallback (none configured today)
+            raise
 
-#     def asr(self, wav_path: str, diarize=True, policy_ctx=None) -> Dict[str,Any]:
-#         raise NotImplementedError
+    # ---- TTS ----
+    def tts(self, segments: list[dict], voice: dict|str, policy_ctx: Optional[Dict[str,Any]]=None) -> str:
+        use = self._use("tts", policy_ctx or {})
+        Prov = self._load_provider(use)
+        return Prov().synthesize(segments, voice=voice, lang=(policy_ctx or {}).get("lang"))
 
-#     def tts(self, segments: list[dict], voice: dict|str, policy_ctx=None) -> str:
-#         raise NotImplementedError
-
-#     def ocr(self, file_path: str, policy_ctx=None) -> dict:
-#         raise NotImplementedError
+    # ---- OCR ----
+    def ocr(self, file_path: str, policy_ctx: Optional[Dict[str,Any]]=None) -> dict:
+        use = self._use("ocr", policy_ctx or {})
+        Prov = self._load_provider(use)
+        return Prov().extract(file_path, lang=(policy_ctx or {}).get("lang"))

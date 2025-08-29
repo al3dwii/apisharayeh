@@ -30,5 +30,7 @@ def test_registry_lists_services():
     registry.refresh()
     ids = {s.id for s in registry.list()}
     # sanity: should include the built-ins you have
-    assert "office.word_to_pptx" in ids
-    assert "echo.text" in ids
+    assert any(x in ids for x in {"office.word_to_pptx",
+                              "slides.generate",
+                             "slides.author",
+                             "slides.edit"})

@@ -11,11 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript fontconfig locales \
     fonts-dejavu-core \
     fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
+    ffmpeg \
   && sed -i 's/# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen \
   && sed -i 's/# *ar_SA.UTF-8/ar_SA.UTF-8/' /etc/locale.gen \
   && locale-gen \
   && fc-cache -f -v \
   && rm -rf /var/lib/apt/lists/*
+
 
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
