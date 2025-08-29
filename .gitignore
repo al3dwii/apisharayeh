@@ -60,3 +60,4 @@ caddy_config/
 
 # keep env template
 !.env.example
+tests/assets/sample.mp4
