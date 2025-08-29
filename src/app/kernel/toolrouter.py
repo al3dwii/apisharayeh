@@ -1,5 +1,6 @@
-# src/app/kernel/toolrouter.py
 from __future__ import annotations
+
+import inspect
 from typing import Callable, Dict, Any, Optional, Set
 
 from .errors import ProblemDetails
@@ -16,13 +17,13 @@ class ToolRouter:
     """
 
     def __init__(self) -> None:
-        self._tools: Dict[str, Callable[..., Dict[str, Any]]] = {}
+        self._tools: Dict[str, Callable[..., Dict[str, Any] | Any]] = {}
         self._perms: Dict[str, Set[str]] = {}
 
     def register(
         self,
         name: str,
-        func: Callable[..., Dict[str, Any]],
+        func: Callable[..., Dict[str, Any] | Any],
         required_permissions: Optional[Set[str]] = None,
     ) -> "ToolRouter":
         if not callable(func):
@@ -41,6 +42,43 @@ class ToolRouter:
     def list(self) -> list[str]:
         return sorted(self._tools.keys())
 
+    def _emit(self, ctx, topic: str, payload: Dict[str, Any]) -> None:
+        """Emit an event if the context supports it."""
+        emit = getattr(ctx, "emit", None)
+        if callable(emit):
+            try:
+                emit(topic, payload)
+            except Exception:
+                # Emission must never break the op
+                pass
+
+    def _call_with_ctx_if_needed(self, fn: Callable, ctx, **kwargs) -> Any:
+        """
+        Call `fn` with or without ctx depending on its signature.
+        Supports:
+          def op(ctx, **kwargs) ...
+          def op(**kwargs) ...
+        """
+        try:
+            sig = inspect.signature(fn)
+        except (TypeError, ValueError):
+            # Builtins or C-extensions: assume they accept ctx first (best effort)
+            return fn(ctx, **kwargs)
+
+        params = list(sig.parameters.values())
+        pass_ctx = False
+        if params:
+            p0 = params[0]
+            if p0.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                # Heuristic: treat first param named 'ctx' or 'context' as a context param
+                if p0.name in ("ctx", "context"):
+                    pass_ctx = True
+
+        if pass_ctx:
+            return fn(ctx, **kwargs)
+        else:
+            return fn(**kwargs)
+
     def call(self, name: str, ctx, **kwargs) -> Dict[str, Any]:
         """
         Invoke a registered op:
@@ -58,8 +96,9 @@ class ToolRouter:
 
         # Permission check (ops can double-check internally too)
         required = self._perms.get(name, set())
-        if required and not required.issubset(ctx.permissions):
-            missing = sorted(required - set(ctx.permissions))
+        ctx_perms = set(getattr(ctx, "permissions", set()) or set())
+        if required and not required.issubset(ctx_perms):
+            missing = sorted(required - ctx_perms)
             raise ProblemDetails(
                 title="Permission denied",
                 detail=f"'{name}' requires: {', '.join(missing)}",
@@ -69,85 +108,20 @@ class ToolRouter:
 
         fn = self._tools[name]
 
-        # Emit step lifecycle
-        ctx.emit("step", {"name": name, "status": "started"})
+        # Emit step lifecycle with a tiny bit of context (argument keys only to avoid PII)
+        self._emit(ctx, "step", {"name": name, "status": "started", "args": sorted(kwargs.keys())})
         try:
-            out = fn(ctx, **kwargs)
+            out = self._call_with_ctx_if_needed(fn, ctx, **kwargs)
             if out is None:
                 out = {}
             if not isinstance(out, dict):
                 # Normalize unexpected returns
                 out = {"result": out}
-            ctx.emit("step", {"name": name, "status": "succeeded"})
+            self._emit(ctx, "step", {"name": name, "status": "succeeded"})
             return out
         except ProblemDetails:
-            ctx.emit("step", {"name": name, "status": "failed"})
+            self._emit(ctx, "step", {"name": name, "status": "failed"})
             raise
         except Exception as e:
-            ctx.emit("step", {"name": name, "status": "failed"})
+            self._emit(ctx, "step", {"name": name, "status": "failed", "error": str(e)})
             raise
-
-
-# from __future__ import annotations
-# from typing import Any, Dict, Callable
-# from app.kernel.errors import ProblemDetails
-
-# # --- slides ops (from your updated slides.py) ---
-# from app.kernel.ops.slides import (
-#     outline_from_prompt_stub,
-#     outline_from_doc,
-#     html_render,     # maps to op: "slides.html.render"
-#     export_pdf,      # maps to op: "slides.export.pdf"
-#     # export_pptx_stub  # (optional) if you want to register it too
-# )
-
-# # --- vision (placeholders/images for DEV) ---
-# from app.kernel.ops.vision import images_from_fixtures
-
-# # --- IO ops (you already have these) ---
-# from app.kernel.ops.io import fetch as io_fetch, save_text as io_save_text
-
-# # --- Document ops (you already have these) ---
-# from app.kernel.ops.doc import (
-#     detect_type as doc_detect_type,
-#     parse_docx as doc_parse_docx,
-#     parse_txt as doc_parse_txt,
-# )
-
-# class ToolRouter:
-#     """
-#     String-op → function registry.
-#     Each function signature: fn(ctx, **kwargs) -> dict
-#     """
-#     def __init__(self):
-#         self._ops: Dict[str, Callable[..., Dict[str, Any]]] = {
-#             # slides
-#             "slides.outline.from_prompt_stub": outline_from_prompt_stub,
-#             "slides.outline.from_doc":        outline_from_doc,
-#             "slides.html.render":             html_render,
-#             "slides.export.pdf":              export_pdf,
-#             # "slides.export.pptx_stub":      export_pptx_stub,  # (optional)
-
-#             # vision
-#             "vision.images.from_fixtures":    images_from_fixtures,
-
-#             # io
-#             "io.fetch":                       io_fetch,
-#             "io.save_text":                   io_save_text,
-
-#             # doc
-#             "doc.detect_type":                doc_detect_type,
-#             "doc.parse_docx":                 doc_parse_docx,
-#             "doc.parse_txt":                  doc_parse_txt,
-#         }
-
-#     def call(self, op: str, ctx, **kwargs) -> Dict[str, Any]:
-#         fn = self._ops.get(op)
-#         if not fn:
-#             raise ProblemDetails(
-#                 title="Unknown operation",
-#                 detail=f"op='{op}' not registered",
-#                 code="E_OP_UNKNOWN",
-#                 status=400,
-#             )
-#         return fn(ctx, **kwargs)

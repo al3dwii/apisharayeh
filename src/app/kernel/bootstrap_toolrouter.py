@@ -1,4 +1,3 @@
-# src/app/kernel/bootstrap_toolrouter.py
 from __future__ import annotations
 
 from .toolrouter import ToolRouter
@@ -17,6 +16,12 @@ from .ops import echo as echo_ops
 from app.kernel.ops import slides_export  # new module providing export_pdf/html_zip/media_thumbnail
 
 from .ops import slides_citations as slides_citations_ops  # ← add
+
+# Media ops (new)
+try:
+    from app.kernel.ops import media as media_ops  # provides register(tr) or individual ops
+except Exception:  # pragma: no cover
+    media_ops = None  # type: ignore
 
 
 # Optional helper module (may not exist in some trees)
@@ -104,6 +109,23 @@ def build_toolrouter() -> ToolRouter:
     tr.register("slides.export.pdf",      slides_export.export_pdf,      _perms(slides_export.export_pdf,      {"fs_read", "fs_write"}))
     tr.register("slides.export.html_zip", slides_export.export_html_zip, _perms(slides_export.export_html_zip, {"fs_read", "fs_write"}))
     tr.register("media.thumb",            slides_export.media_thumbnail, _perms(slides_export.media_thumbnail, {"fs_read", "fs_write"}))
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Media (ASR/Translate/TTS/Mux/Subs) — new
+    # ──────────────────────────────────────────────────────────────────────────────
+    if media_ops is not None:
+        # Prefer a single register(tr) hook if the module provides it
+        register_hook = getattr(media_ops, "register", None)
+        if callable(register_hook):
+            register_hook(tr)
+        else:
+            # Fall back to per-function registration (works if you didn't add a register() helper)
+            _maybe_register(tr, "media.extract_audio", media_ops, "op_extract_audio", {"fs_read", "fs_write"})
+            _maybe_register(tr, "media.asr",           media_ops, "op_asr",           {"fs_read", "fs_write"})
+            _maybe_register(tr, "media.translate",     media_ops, "op_translate_segments", {"fs_read", "fs_write"})
+            _maybe_register(tr, "media.tts",           media_ops, "op_tts",           {"fs_read", "fs_write"})
+            _maybe_register(tr, "media.mux",           media_ops, "op_mux",           {"fs_read", "fs_write"})
+            _maybe_register(tr, "media.subtitles",     media_ops, "op_subtitles",     {"fs_read", "fs_write"})
 
     # Docs
     tr.register("doc.detect_type", doc_ops.detect_type, _perms(doc_ops.detect_type, set()))

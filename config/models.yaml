@@ -1,10 +1,25 @@
+# config/models.yaml
+
 llm:
+  # keep your current default here; used for chat and as translate fallback
   default: openai:gpt-4o-mini
-mt:
-  default: openai:gpt-4o-mini
+
 asr:
-  default: whisperx:large-v3
+  # tiny local model via faster-whisper; provider reads ASR_MODEL env (e.g., tiny.en/base.en/large-v3)
+  default: whisper:tiny.en
+
 tts:
-  default: azure:neural
+  # zero-download: macOS 'say' / Linux 'espeak'
+  default: system:tts
+
 ocr:
-  default: paddleocr:server
+  default: tesseract:cpu
+
+mt:
+  # Argos for en<->ar — add more as you install packages
+  default: argos:en-ar
+  rules:
+    - when:
+        source_lang: ar
+        target_lang: en
+      use: argos:ar-en

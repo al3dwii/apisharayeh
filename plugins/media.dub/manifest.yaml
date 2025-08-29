@@ -1,0 +1,33 @@
+id: media.dub
+name: Media: Dub Video
+version: 0.1.0
+runtime: dsl
+entrypoint: flow.yaml
+
+resources:
+  queue: cpu
+  timeout: 1800
+
+inputs:
+  - id: video
+    type: artifact
+    required: true
+  - id: target_lang
+    type: string
+    required: true
+  - id: voice
+    type: string
+    required: false
+    default: en-US-JennyNeural
+
+outputs:
+  - id: dubbed
+    type: artifact
+  - id: srt
+    type: artifact
+  - id: transcript
+    type: json
+
+description: >
+  Extract audio, ASR -> translate -> TTS, then mux the new audio onto the original
+  video and emit a subtitles file.

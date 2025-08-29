@@ -1,17 +1,47 @@
 # app/services/ffmpeg.py
-import subprocess, tempfile, os, json, shlex, pathlib
+import subprocess, tempfile, os, json
 
-def _run(cmd: list[str]) -> None:
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    return p
+def _run(cmd):
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
 
 def probe(path: str) -> dict:
-    cmd = ["ffprobe","-v","error","-print_format","json","-show_format","-show_streams", path]
-    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    p = subprocess.run(["ffprobe","-v","error","-print_format","json","-show_format","-show_streams", path],
+                       capture_output=True, check=True, text=True)
     return json.loads(p.stdout)
 
 def ensure_wav_mono_16k(src: str) -> str:
     out = tempfile.NamedTemporaryFile(delete=False, suffix=".wav"); out.close()
-    cmd = ["ffmpeg","-y","-i",src,"-ac","1","-ar","16000","-f","wav", out.name]
-    _run(cmd)
+    _run(["ffmpeg","-y","-i",src,"-ac","1","-ar","16000","-f","wav", out.name])
     return out.name
+
+def extract_audio(src_media: str, out_wav: str, sample_rate: int = 16000) -> None:
+    os.makedirs(os.path.dirname(out_wav), exist_ok=True)
+    _run(["ffmpeg","-y","-i",src_media,"-vn","-ac","1","-ar",str(sample_rate),"-f","wav", out_wav])
+
+def mux_replace_audio(src_video: str, new_audio_wav: str, out_video: str) -> None:
+    os.makedirs(os.path.dirname(out_video), exist_ok=True)
+    # Re-encode audio to AAC, copy video, trim to shortest
+    _run([
+        "ffmpeg","-y",
+        "-i", src_video,
+        "-i", new_audio_wav,
+        "-map","0:v:0","-map","1:a:0",
+        "-c:v","copy","-c:a","aac","-b:a","192k",
+        "-shortest",
+        out_video
+    ])
+
+def _fmt_time(t: float) -> str:
+    hrs = int(t // 3600); t -= hrs*3600
+    mins = int(t // 60);   t -= mins*60
+    secs = int(t)
+    ms = int(round((t - secs)*1000))
+    return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
+
+def write_srt(segments, out_path: str) -> None:
+    """segments: [{start, end, text}]"""
+    with open(out_path, "w", encoding="utf-8") as f:
+        for i, s in enumerate(segments, start=1):
+            f.write(f"{i}\n")
+            f.write(f"{_fmt_time(float(s.get('start',0)))} --> {_fmt_time(float(s.get('end',0)))}\n")
+            f.write((s.get("text","") or "").strip() + "\n\n")
