@@ -75,6 +75,17 @@ class UploadBlocked(Exception):
     """Raised when an inbound upload is blocked by policy."""
     pass
 
+# near the top (with the other globals)
+def _ports_from_env(default="80,443"):
+    raw = os.getenv("ALLOWED_PORTS", default)
+    ports = set()
+    for tok in (raw or "").split(","):
+        tok = tok.strip()
+        if tok.isdigit():
+            ports.add(int(tok))
+    return ports or {80, 443}
+
+ALLOWED_PORTS = _ports_from_env()   # replaces the fixed {80, 443}
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Helpers
