@@ -1,83 +1,51 @@
-{
-  "id": "media.dub",
-  "name": "Media: Dub Video",
-  "version": "0.1.0",
-  "runtime": "dsl",
-  "resources":
-  "queue: media",
+# plugins/media.dub/manifest.yaml
+id: media.dub
+name: Media Dubbing
+version: "0.1.0"
+description: "Dubs an input video/audio into a target language and emits a dubbed MP4 plus optional subtitles and timeline."
+# How your runtime discovers/executes this service (adjust to your project convention)
+entrypoint:
+  module: "plugins.media.dub.service"
+  handler: "run"
 
-  "inputs": {
-    "type": "object",
-    "properties": {
-      "video": { "type": "string" },
-      "target_lang": { "type": "string" },
-      "voice": { "type": "string" }
-    },
-    "required": ["video", "target_lang", "voice"]
-  },
+# What the service expects (example; keep your current inputs if you already have them)
+inputs:
+  source_media:
+    type: file
+    media_type: "video/*,audio/*"
+    description: "Input video or audio to dub."
+  target_language:
+    type: string
+    description: "IETF language tag (e.g., en, ar, es-ES)."
+  voice:
+    type: string
+    optional: true
+    description: "Voice/style preset, if supported."
+  translate_only:
+    type: boolean
+    optional: true
+    default: false
+    description: "If true, produce subtitles only."
 
-  "steps": [
-    {
-      "id": "extract",
-      "run": "media.extract_audio",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "src_video": "{{ inputs.video }}",
-        "sample_rate": 16000
-      }
-    },
-    {
-      "id": "asr",
-      "run": "media.asr",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "src_audio": "{{ steps.extract.audio }}",
-        "lang": null,
-        "diarize": false
-      }
-    },
-    {
-      "id": "translate",
-      "run": "media.translate",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "segments": "{{ steps.asr.segments }}",
-        "target_lang": "{{ inputs.target_lang }}",
-        "source_lang": "{{ steps.asr.language }}"
-      }
-    },
-    {
-      "id": "tts",
-      "run": "media.tts",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "segments": "{{ steps.translate.segments }}",
-        "voice": "{{ inputs.voice }}",
-        "lang": "{{ inputs.target_lang }}"
-      }
-    },
-    {
-      "id": "mux",
-      "run": "media.mux",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "src_video": "{{ inputs.video }}",
-        "new_audio": "{{ steps.tts.audio }}"
-      }
-    },
-    {
-      "id": "subs",
-      "run": "media.subtitles",
-      "in": {
-        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
-        "segments": "{{ steps.translate.segments }}"
-      }
-    }
-  ],
+# ✅ REQUIRED: declare what artifacts this service writes
+outputs:
+  dubbed_video:
+    type: file
+    media_type: "video/mp4"
+    description: "Path/URL to the dubbed MP4."
+  subtitles_srt:
+    type: file
+    media_type: "text/plain"
+    optional: true
+    description: "Optional SRT subtitles."
+  timeline_json:
+    type: file
+    media_type: "application/json"
+    optional: true
+    description: "Optional word/segment timing JSON."
 
-  "outputs": {
-    "dubbed": "{{ steps.mux.video }}",
-    "srt": "{{ steps.subs.srt }}",
-    "transcript": "{{ steps.asr }}"
-  }
-}
+# Minimal permissions (tweak to your security model)
+permissions:
+  fs_read: true
+  fs_write: true
+  net_http: false
