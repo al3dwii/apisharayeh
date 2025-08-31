@@ -15,18 +15,9 @@ if [[ -f .env ]]; then
   source .env
   set +a
 fi
-export PYTHONPATH="src:${PYTHONPATH:-}"
 
-echo "[dev-worker] environment"
-echo "  PYTHONPATH=${PYTHONPATH}"
-echo "  DATABASE_URL=${DATABASE_URL:-}"
-echo "  REDIS_URL_QUEUE=${REDIS_URL_QUEUE:-}"
-echo "  PLUGINS_DIR=${PLUGINS_DIR:-}"
-echo "  ARTIFACTS_DIR=${ARTIFACTS_DIR:-}"
-echo "  SOFFICE_BIN=${SOFFICE_BIN:-}"
-echo
+export PYTHONPATH="${PYTHONPATH:-src}:$ROOT/src"
 
-# Probe import so we fail fast if path/env is wrong
 python - <<'PY' || true
 import sys
 print("[worker] python OK, path entries:", len(sys.path))
@@ -37,5 +28,5 @@ except Exception as e:
     print("[worker] import app: FAILED:", e)
 PY
 
-# Concurrency=1 keeps logs ordered during smoke tests
-exec celery -A app.workers.celery_app worker -Q cpu,io,llm,default --concurrency=1 --loglevel=INFO
+# ✅ Listen on 'media' as well (this was missing)
+exec celery -A app.workers.celery_app worker -Q media,cpu,io,llm,default --concurrency=1 --loglevel=INFO

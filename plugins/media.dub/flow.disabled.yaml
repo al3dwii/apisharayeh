@@ -1,5 +1,4 @@
 # plugins/media.dub/flow.yaml
-# DSL flow — uses @aliases instead of steps.* so interpolation works with the runner
 steps:
   - id: extract
     op: media.extract_audio
@@ -25,7 +24,7 @@ steps:
     op: media.translate
     in:
       project_id: "{{ context.project_id }}"
-      segments:    "{{ @src_segments }}"
+      segments:    {{ @src_segments }}        # <-- pass the list, not a string
       target_lang: "{{ inputs.target_lang }}"
       source_lang: "{{ @src_lang }}"
     out:
@@ -35,7 +34,7 @@ steps:
     op: media.tts
     in:
       project_id: "{{ context.project_id }}"
-      segments:    "{{ @tr_segments }}"
+      segments:    {{ @tr_segments }}         # <-- pass the list, not a string
       voice:       "{{ inputs.voice }}"
       lang:        "{{ inputs.target_lang }}"
     out:
@@ -54,7 +53,7 @@ steps:
     op: media.subtitles
     in:
       project_id: "{{ context.project_id }}"
-      segments:   "{{ @tr_segments }}"
+      segments:   {{ @tr_segments }}          # <-- pass the list, not a string
     out:
       srt: "@srt_path"
 
@@ -63,4 +62,4 @@ outputs:
   srt: "{{ @srt_path }}"
   transcript:
     language: "{{ @src_lang }}"
-    segments: "{{ @src_segments }}"
+    segments: {{ @src_segments }}             # <-- pass the list, not a string

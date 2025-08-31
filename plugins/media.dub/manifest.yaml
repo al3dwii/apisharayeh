@@ -1,50 +1,38 @@
-# plugins/media.dub/manifest.yaml
 id: media.dub
 name: Media Dubbing
 version: "0.1.0"
-description: "Dubs an input video/audio into a target language and emits a dubbed MP4 plus optional subtitles and timeline."
-# How your runtime discovers/executes this service (adjust to your project convention)
+description: "Dub an input video/audio into a target language."
+runtime: inproc
 entrypoint:
   module: "plugins.media.dub.service"
   handler: "run"
 
-# What the service expects (example; keep your current inputs if you already have them)
 inputs:
-  source_media:
+  video:
     type: file
     media_type: "video/*,audio/*"
-    description: "Input video or audio to dub."
-  target_language:
+  target_lang:
     type: string
-    description: "IETF language tag (e.g., en, ar, es-ES)."
   voice:
     type: string
     optional: true
-    description: "Voice/style preset, if supported."
-  translate_only:
-    type: boolean
-    optional: true
-    default: false
-    description: "If true, produce subtitles only."
 
-# ✅ REQUIRED: declare what artifacts this service writes
 outputs:
   dubbed_video:
     type: file
     media_type: "video/mp4"
-    description: "Path/URL to the dubbed MP4."
   subtitles_srt:
     type: file
     media_type: "text/plain"
     optional: true
-    description: "Optional SRT subtitles."
-  timeline_json:
+  transcript:
     type: file
     media_type: "application/json"
     optional: true
-    description: "Optional word/segment timing JSON."
 
-# Minimal permissions (tweak to your security model)
+resources:
+  queue: media
+
 permissions:
   fs_read: true
   fs_write: true
