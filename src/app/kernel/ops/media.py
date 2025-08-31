@@ -87,12 +87,12 @@ def op_asr(project_id: str, src_audio: str, lang: Optional[str] = None, diarize:
     return out
 
 def op_translate_segments(project_id: str, segments: Any, target_lang: str, source_lang: Optional[str] = None) -> Dict[str, Any]:
-    """Translate ASR segments' text into target_lang. Accepts list/dict/path/JSON/pyrepr."""
+    """Translate ASR segments' text into target_lang."""
     router = ModelRouter()
-    seg_list = _coerce_segments_arg(segments)
+    seg_list = _load_segments_like(segments)
     tr_segs: List[Dict[str, Any]] = []
     for seg in seg_list:
-        txt = seg.get("text", "") if isinstance(seg, dict) else str(seg)
+        txt = seg.get("text","") if isinstance(seg, dict) else str(seg)
         if not txt.strip():
             tr_segs.append({**(seg if isinstance(seg, dict) else {}), "text": ""})
             continue
@@ -105,11 +105,19 @@ def op_translate_segments(project_id: str, segments: Any, target_lang: str, sour
 def op_tts(project_id: str, segments: Any, voice: str, lang: Optional[str] = None, sample_rate: int = 24000) -> Dict[str, Any]:
     """Synthesize translated segments to a single WAV using router.tts."""
     router = ModelRouter()
-    seg_list = _coerce_segments_arg(segments)
+    seg_list = _load_segments_like(segments)
+    # If no valid timings, collapse into a single segment so TTS speaks the content.
+    def _valid(seg):
+        try:
+            return float(seg.get("end",0)) > float(seg.get("start",0))
+        except Exception:
+            return False
+    if not any(_valid(s) for s in seg_list if isinstance(s, dict)):
+        joined = " ".join([ (s.get("text","") if isinstance(s, dict) else str(s)).strip() for s in seg_list ]).strip()
+        seg_list = [{"text": joined, "start": 0.0, "end": 0.0}]
     t0 = time.time()
     wav_path = router.tts(seg_list, voice=voice, policy_ctx={"lang": lang} if lang else None)
-    out_dir = _project_dir(project_id) / "media"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _project_dir(project_id) / "media"; out_dir.mkdir(parents=True, exist_ok=True)
     out_wav = out_dir / (f"tts_{Path(wav_path).stem}.wav")
     Path(wav_path).replace(out_wav)
     return {
@@ -131,9 +139,8 @@ def op_mux(project_id: str, src_video: str, new_audio: str) -> Dict[str, Any]:
 
 def op_subtitles(project_id: str, segments: Any, kind: str = "srt") -> Dict[str, Any]:
     """Write SRT (or VTT in future) from segments."""
-    seg_list = _coerce_segments_arg(segments)
-    out_dir = _project_dir(project_id) / "media"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    seg_list = _load_segments_like(segments)
+    out_dir = _project_dir(project_id) / "media"; out_dir.mkdir(parents=True, exist_ok=True)
     out_srt = out_dir / "subtitles.srt"
     write_srt(seg_list, str(out_srt))
     return {"srt": f"/artifacts/{project_id}/media/{out_srt.name}"}
@@ -148,3 +155,62 @@ def register(toolrouter) -> None:
     toolrouter.register("media.tts",           op_tts)
     toolrouter.register("media.mux",           op_mux)
     toolrouter.register("media.subtitles",     op_subtitles)
+
+
+def _load_segments_like(segments: Any) -> List[Dict[str, Any]]:
+    """Accept list/dict, artifacts path, on-disk json path, inline JSON, or python repr."""
+    import json, ast
+    from pathlib import Path
+    ROOT = Path("/Users/omair/O2")  # adjust if your project root differs
+
+    def _from_obj(obj):
+        if isinstance(obj, list):
+            return [x if isinstance(x, dict) else {"text": str(x)} for x in obj]
+        if isinstance(obj, dict):
+            if isinstance(obj.get("segments"), list):
+                return _from_obj(obj["segments"])
+            return [obj]
+        return []
+
+    if isinstance(segments, str):
+        sp = segments.strip()
+
+        # 1) Try inline JSON first
+        if sp[:1] in "[{":
+            try:
+                return _from_obj(json.loads(sp))
+            except Exception:
+                pass
+
+        # 2) Try python repr (this is what your pipeline sometimes passes)
+        try:
+            obj = ast.literal_eval(sp)
+            return _from_obj(obj)
+        except Exception:
+            pass
+
+        # 3) Looks like an artifacts path? Map to filesystem and read JSON if present
+        if sp.startswith("/artifacts/"):
+            fs = ROOT / sp.lstrip("/")
+            if fs.exists() and fs.suffix.lower() == ".json":
+                try:
+                    return _from_obj(json.loads(fs.read_text("utf-8")))
+                except Exception:
+                    return []
+
+        # 4) Only now consider real filesystem paths; keep them short & plausible
+        looks_like_path = (len(sp) < 260 and sp.endswith(".json")
+                           and ("/" in sp or sp.startswith(".")))
+        if looks_like_path:
+            fs = Path(sp)
+            if fs.exists():
+                try:
+                    return _from_obj(json.loads(fs.read_text("utf-8")))
+                except Exception:
+                    return []
+
+        # 5) Fallback: treat the string as a single free-text segment
+        return [{"text": sp}]
+
+    # Already structured
+    return _from_obj(segments)
