@@ -87,26 +87,21 @@ def op_asr(project_id: str, src_audio: str, lang: Optional[str] = None, diarize:
     return out
 
 def op_translate_segments(project_id: str, segments: Any, target_lang: str, source_lang: Optional[str] = None) -> Dict[str, Any]:
-    """Translate ASR segments' text into target_lang. Accepts list or JSON/path string."""
+    """Translate ASR segments' text into target_lang. Accepts list/dict/path/JSON/pyrepr."""
     router = ModelRouter()
     seg_list = _coerce_segments_arg(segments)
     tr_segs: List[Dict[str, Any]] = []
-    for s in seg_list:
-        if isinstance(s, dict):
-            txt = s.get("text", "")
-        else:
-            txt = str(s)
-            s = {}
+    for seg in seg_list:
+        txt = seg.get("text", "") if isinstance(seg, dict) else str(seg)
         if not txt.strip():
-            tr_segs.append({**s, "text": ""})
+            tr_segs.append({**(seg if isinstance(seg, dict) else {}), "text": ""})
             continue
         t = router.translate(txt, source=source_lang, target=target_lang)
-        tr_segs.append({**s, "text": t})
+        tr_segs.append({**(seg if isinstance(seg, dict) else {}), "text": t})
     out = {"segments": tr_segs, "target_lang": target_lang, "source_lang": source_lang}
     path = _save_json(project_id, out, f"media/segments.{target_lang}.json")
     out["path"] = f"/artifacts/{project_id}/media/{Path(path).name}"
     return out
-
 def op_tts(project_id: str, segments: Any, voice: str, lang: Optional[str] = None, sample_rate: int = 24000) -> Dict[str, Any]:
     """Synthesize translated segments to a single WAV using router.tts."""
     router = ModelRouter()

@@ -18,19 +18,19 @@ def extract_audio(src_media: str, out_wav: str, sample_rate: int = 16000) -> Non
     os.makedirs(os.path.dirname(out_wav), exist_ok=True)
     _run(["ffmpeg","-y","-i",src_media,"-vn","-ac","1","-ar",str(sample_rate),"-f","wav", out_wav])
 
-def mux_replace_audio(src_video: str, new_audio_wav: str, out_video: str) -> None:
-    os.makedirs(os.path.dirname(out_video), exist_ok=True)
-    # Re-encode audio to AAC, copy video, trim to shortest
+def mux_replace_audio(src_media: str, new_audio: str, out_mp4: str) -> None:
+    """Mux video with new audio (explicit maps, keep video, AAC audio)."""
     _run([
         "ffmpeg","-y",
-        "-i", src_video,
-        "-i", new_audio_wav,
+        "-i", src_media,
+        "-i", new_audio,
         "-map","0:v:0","-map","1:a:0",
-        "-c:v","copy","-c:a","aac","-b:a","192k",
+        "-c:v","copy",
+        "-c:a","aac","-b:a","192k",
+        "-ar","48000","-ac","2",
         "-shortest",
-        out_video
+        out_mp4
     ])
-
 def _fmt_time(t: float) -> str:
     hrs = int(t // 3600); t -= hrs*3600
     mins = int(t // 60);   t -= mins*60
