@@ -1,13 +1,20 @@
+from __future__ import annotations
+
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import Optional
+
 
 class Settings(BaseSettings):
-    # App/Env
+    # App / Env
     ENV: str = "dev"
     APP_NAME: str = "agenticBE"
     PORT: int = 8080
     PUBLIC_BASE_URL: str = "http://localhost:8081"  # Caddy or API port you expose
+
+    # Dev switch: disable multi-tenant gating & RLS
+    # Set DISABLE_TENANT=1 in your shell to bypass tenant checks in dev.
+    DISABLE_TENANT: bool = Field(default=False)
 
     # Paths / Plugins / Models
     ARTIFACTS_DIR: str = "/srv/artifacts"
@@ -27,12 +34,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_USER_PER_MIN: int = 120
     RATE_LIMIT_TENANT_PER_MIN: int = 240
 
-        # Speech / ASR / OCR providers
+    # Speech / ASR / OCR providers
     AZURE_SPEECH_KEY: Optional[str] = None
     AZURE_SPEECH_REGION: Optional[str] = None
     ASR_DEVICE: str = "auto"  # "cpu" | "cuda" | "auto"
     PADDLE_OCR_BASE: Optional[str] = None
-
 
     # Optional S3 (unused in local)
     S3_ENDPOINT: Optional[str] = None
@@ -50,5 +56,6 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
+
 
 settings = Settings()

@@ -1,30 +1,83 @@
-id: media.dub
-name: "Media: Dub Video"
-version: "0.1.0"
-runtime: dsl
-entrypoint: flow.yaml
+{
+  "id": "media.dub",
+  "name": "Media: Dub Video",
+  "version": "0.1.0",
+  "runtime": "dsl",
+  "resources":
+  "queue: media",
 
-inputs:
-  video:
-    type: string
-    description: Path to a local or artifact video
-  target_lang:
-    type: string
-    default: en-US
-  voice:
-    type: string
-    default: Samantha
+  "inputs": {
+    "type": "object",
+    "properties": {
+      "video": { "type": "string" },
+      "target_lang": { "type": "string" },
+      "voice": { "type": "string" }
+    },
+    "required": ["video", "target_lang", "voice"]
+  },
 
-outputs:
-  dubbed:
-    type: string
-    description: Path to the dubbed MP4
-  transcript:
-    type: json
-    description: ASR transcript
+  "steps": [
+    {
+      "id": "extract",
+      "run": "media.extract_audio",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "src_video": "{{ inputs.video }}",
+        "sample_rate": 16000
+      }
+    },
+    {
+      "id": "asr",
+      "run": "media.asr",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "src_audio": "{{ steps.extract.audio }}",
+        "lang": null,
+        "diarize": false
+      }
+    },
+    {
+      "id": "translate",
+      "run": "media.translate",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "segments": "{{ steps.asr.segments }}",
+        "target_lang": "{{ inputs.target_lang }}",
+        "source_lang": "{{ steps.asr.language }}"
+      }
+    },
+    {
+      "id": "tts",
+      "run": "media.tts",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "segments": "{{ steps.translate.segments }}",
+        "voice": "{{ inputs.voice }}",
+        "lang": "{{ inputs.target_lang }}"
+      }
+    },
+    {
+      "id": "mux",
+      "run": "media.mux",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "src_video": "{{ inputs.video }}",
+        "new_audio": "{{ steps.tts.audio }}"
+      }
+    },
+    {
+      "id": "subs",
+      "run": "media.subtitles",
+      "in": {
+        "project_id": "{{ context.project_id | default(inputs.project_id) }}",
+        "segments": "{{ steps.translate.segments }}"
+      }
+    }
+  ],
 
-resources:
-  queue: media
-permissions:
-  fs_read: true
-  fs_write: true
+  "outputs": {
+    "dubbed": "{{ steps.mux.video }}",
+    "srt": "{{ steps.subs.srt }}",
+    "transcript": "{{ steps.asr }}"
+  }
+}

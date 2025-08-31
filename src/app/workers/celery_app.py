@@ -111,54 +111,58 @@ def _artifacts_path_from_url(u: str) -> Optional[Path]:
 # Tasks ------------------------------------------------------------------------
 
 @celery.task(name="execute_service_job", autoretry_for=())
-def execute_service_job(job_id: str) -> None:
+def execute_service_job(job_id: str, tenant_id: str) -> None:
+    """
+    IMPORTANT: this task now requires the tenant_id to be passed from the API.
+    That lets us set the RLS GUC *before* any SELECTs so the row is visible.
+    """
     from app.services.db import SessionLocal
     from app.models.job import Job
 
     async def _run() -> None:
-        # 1) Load job & set tenant RLS
+        # 1) Load job with tenant RLS set, mark running
         async with SessionLocal() as session:
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            job = res.scalar_one_or_none()
-            if not job:
-                return
-
-            tenant_id = job.tenant_id
+            # Set the GUC first so RLS allows visibility
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
 
+            job = await session.get(Job, job_id)
+            if not job:
+                # Not visible (wrong tenant) or missing
+                return
+
+            # If already terminal, skip
             if job.status in ("succeeded", "failed"):
                 return
 
             job.status = "running"
             await session.commit()
 
+            # Keep the service id handy
+            service_id: Optional[str] = job.service_id
+            if job.manifest_snapshot:
+                try:
+                    snap = ServiceManifest.model_validate(job.manifest_snapshot)
+                    if snap and snap.id:
+                        service_id = snap.id
+                except Exception:
+                    pass
+
         await emit_event(
             tenant_id, job_id,
             step="service.start", status="started",
             payload={
-                "service_id": job.service_id,
+                "service_id": service_id or "",
                 "env": {
                     "SOFFICE_BIN": os.environ.get("SOFFICE_BIN", ""),
                 },
             },
         )
 
-        # 2) Choose service_id (prefer snapshot id)
-        service_id: Optional[str] = job.service_id
-        if job.manifest_snapshot:
-            try:
-                snap = ServiceManifest.model_validate(job.manifest_snapshot)
-                if snap and snap.id:
-                    service_id = snap.id
-            except Exception:
-                pass
-
         if not service_id:
             err = "Job missing service_id"
             async with SessionLocal() as session:
                 await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-                res = await session.execute(select(Job).where(Job.id == job_id))
-                j = res.scalar_one_or_none()
+                j = await session.get(Job, job_id)
                 if j:
                     j.status = "failed"
                     j.error = err
@@ -166,7 +170,7 @@ def execute_service_job(job_id: str) -> None:
             await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err})
             return
 
-        # 3) Run via ServiceRunner in a thread
+        # 2) Run via ServiceRunner in a thread
         err_txt: Optional[str] = None
         outputs: Optional[dict[str, Any]] = None
         try:
@@ -180,16 +184,18 @@ def execute_service_job(job_id: str) -> None:
             inputs = dict(job.input_json or {})
             inputs.setdefault("_job_id", str(job_id))
 
+            if getattr(job, "project_id", None):
+                inputs.setdefault("project_id", job.project_id)
+
             raw_outputs = await asyncio.to_thread(runner.run, service_id, inputs, _on_event, loop)
             outputs = _normalize_artifact_urls(raw_outputs)
         except Exception:
             err_txt = traceback.format_exc(limit=12)
 
-        # 4) Persist (+ validate artifacts) + events
+        # 3) Persist (+ validate artifacts) + events
         async with SessionLocal() as session:
             await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-            res = await session.execute(select(Job).where(Job.id == job_id))
-            j = res.scalar_one_or_none()
+            j = await session.get(Job, job_id)
             if not j:
                 return
 
@@ -200,7 +206,7 @@ def execute_service_job(job_id: str) -> None:
                 await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": j.error})
                 return
 
-            # Validate PDF size if present (catch silent LibreOffice failures)
+            # Validate PDF/PPTX size if present (catch silent LibreOffice failures)
             safe_out = _json_safe(outputs or {})
             artifact_url = None
             if isinstance(safe_out, dict):
@@ -218,14 +224,21 @@ def execute_service_job(job_id: str) -> None:
                     except Exception:
                         size = 0
                     if size < 2048:  # smaller than 2KB is almost certainly a failed export
-                        err_msg = f"artifact too small ({size} bytes) — check LibreOffice. SOFFICE_BIN={os.environ.get('SOFFICE_BIN','')}"
+                        err_msg = (
+                            f"artifact too small ({size} bytes) — check LibreOffice. "
+                            f"SOFFICE_BIN={os.environ.get('SOFFICE_BIN','')}"
+                        )
                         j.status = "failed"
                         j.error = err_msg
                         await session.commit()
-                        await emit_event(tenant_id, job_id, step="service.end", status="failed", payload={"error": err_msg})
+                        await emit_event(
+                            tenant_id, job_id, step="service.end", status="failed", payload={"error": err_msg}
+                        )
                         return
 
-                await emit_event(tenant_id, job_id, step="artifact.ready", status="info", payload={"artifact": artifact_url})
+                await emit_event(
+                    tenant_id, job_id, step="artifact.ready", status="info", payload={"artifact": artifact_url}
+                )
 
             # Success
             j.status = "succeeded"

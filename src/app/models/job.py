@@ -21,6 +21,8 @@ class Job(Base):
     kind: Mapped[str] = mapped_column(nullable=False, index=True)
     status: Mapped[str] = mapped_column(nullable=False, index=True, default="queued")
 
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # <-- add this
+
     input_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     output_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

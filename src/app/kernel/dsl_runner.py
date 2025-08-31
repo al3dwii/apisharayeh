@@ -70,6 +70,7 @@ class EvalContext:
     inputs: Dict[str, Any]
     vars: Dict[str, Any]
     scope: Dict[str, Any]
+    context: Dict[str, Any]                 # << added
     helpers: Dict[str, Callable[..., Any]]
 
 def _safe_eval(expr: str, ev: EvalContext) -> Any:
@@ -77,32 +78,24 @@ def _safe_eval(expr: str, ev: EvalContext) -> Any:
     Evaluate a tiny Python expression with a very small, safe environment.
     Supports @name references by rewriting to __ref("name").
     """
-    # Replace @name with __ref("name")
     expr2 = _AT_IN_EXPR_RE.sub(r'__ref("\1")', (expr or ""))
 
     def __ref(name: str) -> Any:
         return ev.scope.get(name)
 
-    # Note: provide lowercase aliases ('true', 'false', 'null', 'none', 'yes', 'no')
     env = {
         "__builtins__": {},
 
-        # Data (wrapped so attribute-style access works: inputs.project_id, etc.)
+        # Data (wrapped so attribute-style access works)
         "inputs": _dot(ev.inputs),
         "vars": _dot(ev.vars),
         "scope": _dot(ev.scope),
+        "context": _dot(ev.context),        # << added (exposes project_id, job_id, etc.)
         "h": ev.helpers,
 
-        # Constants
-        "True": True,
-        "False": False,
-        "None": None,
-        "true": True,
-        "false": False,
-        "null": None,
-        "none": None,
-        "yes": True,
-        "no": False,
+        # Constants / aliases
+        "True": True, "False": False, "None": None,
+        "true": True, "false": False, "null": None, "none": None, "yes": True, "no": False,
 
         # Helpers
         "random_id": _random_id,
@@ -126,7 +119,7 @@ def _apply_filters(value: Any, filters: List[str], ev: EvalContext) -> Any:
             if not value:
                 value = alt
         else:
-            # Unknown filters are ignored (no-op)
+            # Unknown filters: no-op
             pass
     return value
 
@@ -184,19 +177,33 @@ class DSLRunner:
     def __init__(self, toolrouter, ctx):
         self.tr = toolrouter
         self.ctx = ctx
-        self.scope: Dict[str, Any] = {}
+        # expose steps aggregator so {{ steps.<id>.<field> }} works
+        self.scope: Dict[str, Any] = {"steps": {}}
         self.vars: Dict[str, Any] = {}
         self.inputs: Dict[str, Any] = {}
         self.node_status: Dict[str, str] = {}
 
+    def _ctx_view(self) -> Dict[str, Any]:
+        # Only safe, expected fields
+        return {
+            "project_id": getattr(self.ctx, "project_id", None),
+            "job_id": getattr(self.ctx, "job_id", None),
+            "tenant_id": getattr(self.ctx, "tenant_id", None),
+        }
+
     def _helper_url(self, path_or_paths: Any) -> Any:
         if isinstance(path_or_paths, list):
-            return [self.ctx.url_for_item(p) if hasattr(self.ctx, "url_for_item") else self.ctx.url_for(p) for p in path_or_paths]
-        return self.ctx.url_for(path_or_paths)
+            fn = getattr(self.ctx, "url_for_item", None) or getattr(self.ctx, "url_for", None)
+            return [fn(p) for p in path_or_paths] if fn else path_or_paths
+        fn = getattr(self.ctx, "url_for", None)
+        return fn(path_or_paths) if fn else path_or_paths
 
     def compute_vars(self, raw_vars: Dict[str, Any], inputs: Dict[str, Any]):
         self.inputs = inputs or {}
-        ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
+        ev = EvalContext(
+            inputs=self.inputs, vars=self.vars, scope=self.scope,
+            context=self._ctx_view(), helpers={"url": self._helper_url},
+        )
         try:
             for k, v in (raw_vars or {}).items():
                 self.vars[k] = interpolate(v, ev)
@@ -235,7 +242,10 @@ class DSLRunner:
         self._ensure_needs(node)
 
         raw_in = node.get("in") or {}
-        ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
+        ev = EvalContext(
+            inputs=self.inputs, vars=self.vars, scope=self.scope,
+            context=self._ctx_view(), helpers={"url": self._helper_url},
+        )
         resolved_in = interpolate(raw_in, ev)
 
         op = node.get("op") or node.get("run")
@@ -261,6 +271,9 @@ class DSLRunner:
                 status=500,
             )
 
+        # expose this node's outputs under steps.<id>
+        self.scope.setdefault("steps", {})[nid] = result
+
         self._assign_out(node.get("out") or {}, result)
         self.node_status[nid] = "succeeded"
         return NodeResult(id=nid, outputs=result)
@@ -270,7 +283,10 @@ class DSLRunner:
             self.exec_node(sub)
 
     def _exec_switch(self, when: Dict[str, Any]):
-        ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
+        ev = EvalContext(
+            inputs=self.inputs, vars=self.vars, scope=self.scope,
+            context=self._ctx_view(), helpers={"url": self._helper_url},
+        )
         for cond, block in (when or {}).items():
             cond = (cond or "").strip()
             expr = cond[2:-2] if cond.startswith("{{") and cond.endswith("}}") else cond
@@ -283,10 +299,8 @@ class DSLRunner:
                 else:
                     raise ProblemDetails(title="Invalid switch block", detail=str(block), code="E_SWITCH", status=400)
                 break
-        # no match → no-op
 
     def exec_node(self, node: Dict[str, Any]) -> Optional[NodeResult]:
-        # Accept both 'op' and legacy 'run'
         op_name = node.get("op") or node.get("run")
         nid = node.get("id") or f"node_{len(self.node_status)+1}"
 
@@ -300,7 +314,6 @@ class DSLRunner:
             self.node_status[nid] = "succeeded"
             return None
 
-        # Normalize to op-node
         return self._exec_op_node({**node, "op": op_name})
 
     def run(self, flow: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -319,7 +332,10 @@ class DSLRunner:
             for node in node_list:
                 self.exec_node(node)
 
-            ev = EvalContext(inputs=self.inputs, vars=self.vars, scope=self.scope, helpers={"url": self._helper_url})
+            ev = EvalContext(
+                inputs=self.inputs, vars=self.vars, scope=self.scope,
+                context=self._ctx_view(), helpers={"url": self._helper_url},
+            )
             out_spec = flow.get("outputs") or {}
             resolved = {}
             for k, v in out_spec.items():

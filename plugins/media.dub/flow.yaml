@@ -1,51 +1,51 @@
+id: media.dub
+runtime: dsl
+
 steps:
   - id: extract
-    use: media.extract_audio
-    with:
-      project_id: ${context.project_id}
-      src_video: ${inputs.video}
+    op: media.extract_audio
+    in:
+      project_id: "{{ context.project_id }}"
+      src_video: "{{ inputs.video }}"
 
   - id: asr
-    use: media.asr
-    with:
-      project_id: ${context.project_id}
-      src_audio: ${steps.extract.audio}
+    op: media.asr
+    in:
+      project_id: "{{ context.project_id }}"
+      src_audio: "{{ steps.extract.audio }}"
       lang: null
       diarize: false
 
   - id: translate
-    use: media.translate
-    with:
-      project_id: ${context.project_id}
-      segments: ${steps.asr.segments}
-      target_lang: ${inputs.target_lang}
-      source_lang: ${steps.asr.language}
+    op: media.translate
+    in:
+      project_id: "{{ context.project_id }}"
+      segments: "{{ steps.asr.segments }}"
+      target_lang: "{{ inputs.target_lang }}"
+      source_lang: "{{ steps.asr.language }}"
 
   - id: tts
-    use: media.tts
-    with:
-      project_id: ${context.project_id}
-      segments: ${steps.translate.segments}
-      voice: ${inputs.voice}
-      lang: ${inputs.target_lang}
+    op: media.tts
+    in:
+      project_id: "{{ context.project_id }}"
+      segments: "{{ steps.translate.segments }}"
+      voice: "{{ inputs.voice }}"
+      lang: "{{ inputs.target_lang }}"
 
   - id: mux
-    use: media.mux
-    with:
-      project_id: ${context.project_id}
-      src_video: ${inputs.video}
-      new_audio: ${steps.tts.audio}
+    op: media.mux
+    in:
+      project_id: "{{ context.project_id }}"
+      src_video: "{{ inputs.video }}"
+      new_audio: "{{ steps.tts.audio }}"
 
   - id: subs
-    use: media.subtitles
-    with:
-      project_id: ${context.project_id}
-      segments: ${steps.translate.segments}
+    op: media.subtitles
+    in:
+      project_id: "{{ context.project_id }}"
+      segments: "{{ steps.translate.segments }}"
 
-  # Final outputs (your DSL likely auto-collects; this makes it explicit)
-  - id: outputs
-    use: dsl.outputs
-    with:
-      dubbed: ${steps.mux.video}
-      srt: ${steps.subs.srt}
-      transcript: ${steps.asr}
+outputs:
+  dubbed: "{{ steps.mux.video }}"
+  srt: "{{ steps.subs.srt }}"
+  transcript: "{{ steps.asr }}"

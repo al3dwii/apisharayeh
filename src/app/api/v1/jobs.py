@@ -1,14 +1,10 @@
-# /Users/omair/apisharayeh/src/app/api/v1/jobs.py
-# ---------------------------------------------------------------------------
 # Jobs API (plugins-only)
-# - service_id is REQUIRED (legacy packs/agents removed)
+# - service_id is REQUIRED
 # - per-tenant manifest resolution + JSON-Schema validation
 # - idempotency via Idempotency-Key header
 # - queues to Celery based on manifest.resources.queue (default "cpu")
 # - multi-tenant safe lookups (always filter by tenant_id)
 # - normalizes artifact URLs in responses (maps fs paths → /artifacts/…)
-# ---------------------------------------------------------------------------
-
 from __future__ import annotations
 
 import uuid
@@ -26,22 +22,41 @@ from app.core.rate_limit import check_rate_limit
 from app.services.db import tenant_session
 from app.services.idempotency import put_if_absent, get_job_for_key
 from app.models.job import Job
-from app.kernel.plugins.spec import ServiceManifest
 from app.kernel.storage import url_for as storage_url_for
-
 from app.workers.celery_app import execute_service_job
 
 
-router = APIRouter(tags=["jobs"])
+import os
 
-
-class JobCreate(BaseModel):
-    service_id: str = Field(..., description="Plugin service identifier (e.g., 'slides.generate')")
-    inputs: Dict[str, Any] = Field(default_factory=dict)
-    webhook_url: Optional[str] = Field(default=None)
-
+from app.core.config import settings
+from fastapi import HTTPException, status
+from sqlalchemy import text
+from app.kernel.plugins.spec import ServiceManifest
 
 async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) -> ServiceManifest:
+    """
+    In dev, skip tenant gating and read from plugin_registry directly.
+    In prod, enforce tenant_plugins -> plugin_registry join.
+    """
+    dev_bypass = (settings.ENV != "prod") or os.getenv("DISABLE_TENANT_GATING", "") or os.getenv("DISABLE_TENANT", "")
+    if dev_bypass:
+        row = (
+            await session.execute(
+                text("""
+                    SELECT spec
+                    FROM plugin_registry
+                    WHERE service_id = :sid AND enabled = TRUE
+                    ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                    LIMIT 1
+                """),
+                {"sid": service_id},
+            )
+        ).mappings().first()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Service '{service_id}' not found")
+        return ServiceManifest.model_validate(row["spec"])
+
+    # --- strict path for prod ---
     sql = text(
         """
         SELECT pr.spec
@@ -55,6 +70,115 @@ async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) 
         LIMIT 1
         """
     )
+    row = (await session.execute(sql, {"tid": tenant_id, "sid": service_id})).mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Service '{service_id}' is not enabled for this tenant",
+        )
+    return ServiceManifest.model_validate(row["spec"])
+
+
+
+router = APIRouter(tags=["jobs"])
+
+
+class JobCreate(BaseModel):
+    service_id: str = Field(..., description="Plugin service identifier (e.g., 'slides.generate')")
+    project_id: str
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    webhook_url: Optional[str] = Field(default=None)
+
+
+async def _resolve_manifest_no_tenant(session, service_id: str) -> ServiceManifest:
+    """
+    Dev-mode resolver: pull the latest enabled spec for a service directly from plugin_registry,
+    ignoring tenant gating.
+    """
+    sql = text(
+        """
+        SELECT spec
+        FROM plugin_registry
+        WHERE service_id = :sid
+          AND (enabled IS TRUE OR enabled IS NULL)   -- tolerate missing column defaults
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    row = (
+    await session.execute(
+        text("""
+            SELECT spec
+            FROM plugin_registry
+            WHERE service_id = :sid
+              AND (enabled IS TRUE OR enabled IS NULL)
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+        """),
+        {"sid": service_id},
+    )
+).mappings().first()
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Service '{service_id}' is not registered",
+        )
+    return ServiceManifest.model_validate(row["spec"])
+
+
+async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) -> ServiceManifest:
+    if settings.DISABLE_TENANT:
+        # bypass tenant gating entirely in dev
+        return await _resolve_manifest_no_tenant(session, service_id)
+
+    sql = text(
+        """
+        SELECT pr.spec
+        FROM tenant_plugins tp
+        JOIN plugin_registry pr
+          ON pr.service_id = tp.service_id AND pr.version = tp.version
+        WHERE tp.tenant_id = :tid
+          AND tp.service_id = :sid
+          AND tp.enabled = TRUE
+          AND pr.enabled = TRUE
+        LIMIT 1
+        """
+    )
+    row = (await session.execute(sql, {"tid": tenant_id, "sid": service_id})).mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Service '{service_id}' is not enabled for this tenant",
+        )
+    return ServiceManifest.model_validate(row["spec"])
+
+async def resolve_manifest_for_tenant(session, tenant_id: str, service_id: str) -> ServiceManifest:
+    """
+    In dev, skip tenant gating and read from plugin_registry directly.
+    In prod, enforce tenant_plugins -> plugin_registry join.
+    """
+    dev_bypass = (
+        settings.ENV != "prod"
+        or os.getenv("DISABLE_TENANT_GATING", "")
+        or os.getenv("DISABLE_TENANT", "")
+    )
+    if dev_bypass:
+        # use the helper that doesn't reference created_at
+        return await _resolve_manifest_no_tenant(session, service_id)
+
+    # --- strict path for prod ---
+    sql = text("""
+        SELECT pr.spec
+        FROM tenant_plugins tp
+        JOIN plugin_registry pr
+          ON pr.service_id = tp.service_id AND pr.version = tp.version
+        WHERE tp.tenant_id = :tid
+          AND tp.service_id = :sid
+          AND tp.enabled = TRUE
+          AND pr.enabled = TRUE
+        LIMIT 1
+    """)
     row = (await session.execute(sql, {"tid": tenant_id, "sid": service_id})).mappings().first()
     if not row:
         raise HTTPException(
@@ -105,8 +229,10 @@ async def create_job(
     tenant=Depends(get_tenant),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
+    # Rate limit as before (you can use DISABLE_RATE_LIMIT elsewhere if you prefer)
     await check_rate_limit(tenant.id, tenant.user_id)
 
+    # Resolve manifest (tenant-gated in prod, bypassed in dev)
     async with tenant_session(tenant.id) as session:
         manifest = await resolve_manifest_for_tenant(session, tenant.id, req.service_id)
     _validate_inputs_against_manifest(manifest, req.inputs)
@@ -114,6 +240,7 @@ async def create_job(
     payload_for_hash = req.inputs or {}
     job_id = str(uuid.uuid4())
 
+    # Idempotency
     if idempotency_key:
         existing_id = await get_job_for_key(tenant.id, idempotency_key)
         if existing_id:
@@ -138,10 +265,12 @@ async def create_job(
                     response.headers["Location"] = f"/v1/jobs/{winner_id}"
                     return {"id": winner_id, "status": "queued", "idempotent": True}
 
+    # Persist job
     async with tenant_session(tenant.id) as session:
         job = Job(
             id=job_id,
             tenant_id=tenant.id,
+            project_id=req.project_id,
             kind=manifest.id,
             status="queued",
             input_json=req.inputs or {},
@@ -153,9 +282,10 @@ async def create_job(
         session.add(job)
         await session.commit()
 
+    # Enqueue
     try:
-        queue = (manifest.resources or {}).get("queue", "cpu")
-        execute_service_job.apply_async(args=[job_id], queue=queue)
+        queue = ((manifest.resources or {}).get("queue")) or "media"
+        execute_service_job.apply_async(args=[job_id, tenant.id], queue=queue)
     except Exception as e:
         async with tenant_session(tenant.id) as session:
             res = await session.execute(
