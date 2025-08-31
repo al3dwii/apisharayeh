@@ -1,0 +1,64 @@
+steps:
+  - id: extract
+    op: media.extract_audio
+    in:
+      project_id: "{{ context.project_id }}"
+      src_video:  "{{ inputs.video }}"
+      sample_rate: 16000
+    out:
+      audio: "@audio16k"
+
+  - id: asr
+    op: media.asr
+    in:
+      project_id: "{{ context.project_id }}"
+      src_audio:  "{{ @audio16k }}"
+      lang: null
+      diarize: false
+    out:
+      segments: "@src_segments"
+      language: "@src_lang"
+
+  - id: translate
+    op: media.translate
+    in:
+      project_id: "{{ context.project_id }}"
+      segments:    "{{ @src_segments }}"
+      target_lang: "{{ inputs.target_lang }}"
+      source_lang: "{{ @src_lang }}"
+    out:
+      segments: "@tr_segments"
+
+  - id: tts
+    op: media.tts
+    in:
+      project_id: "{{ context.project_id }}"
+      segments:    "{{ @tr_segments }}"
+      voice:       "{{ inputs.voice }}"
+      lang:        "{{ inputs.target_lang }}"
+    out:
+      audio: "@dub_audio"
+
+  - id: mux
+    op: media.mux
+    in:
+      project_id: "{{ context.project_id }}"
+      src_video:  "{{ inputs.video }}"
+      new_audio:  "{{ @dub_audio }}"
+    out:
+      video: "@dub_video"
+
+  - id: subs
+    op: media.subtitles
+    in:
+      project_id: "{{ context.project_id }}"
+      segments:   "{{ @tr_segments }}"
+    out:
+      srt: "@srt_path"
+
+outputs:
+  dubbed: "{{ @dub_video }}"
+  srt: "{{ @srt_path }}"
+  transcript:
+    language: "{{ @src_lang }}"
+    segments: "{{ @src_segments }}"

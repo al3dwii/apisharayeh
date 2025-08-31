@@ -30,6 +30,37 @@ def _save_json(project_id: str, obj: Any, name: str) -> str:
     out.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(out)
 
+def _coerce_segments_arg(segments: Any) -> List[Dict[str, Any]]:
+    """Accept list or JSON/path string and return List[Dict]."""
+    if isinstance(segments, list):
+        return segments
+    if isinstance(segments, str):
+        s = segments.strip()
+        # If artifacts path -> load JSON
+        if s.startswith("/artifacts/"):
+            p = ARTIFACTS / s.split("/artifacts/", 1)[1]
+            if p.exists():
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and "segments" in data:
+                        return data["segments"]  # transcript wrapper
+                    if isinstance(data, list):
+                        return data
+                except Exception:
+                    pass
+        # If inline JSON string
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict) and "segments" in data:
+                return data["segments"]
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+        # Fallback: treat as single segment with just text
+        return [{"text": s, "start": 0.0, "end": 0.0}]
+    return []
+
 # ---- Ops ----
 
 def op_extract_audio(project_id: str, src_video: str, sample_rate: int = 16000) -> Dict[str, Any]:
@@ -55,12 +86,17 @@ def op_asr(project_id: str, src_audio: str, lang: Optional[str] = None, diarize:
     out["path"] = f"/artifacts/{project_id}/media/{Path(path).name}"
     return out
 
-def op_translate_segments(project_id: str, segments: List[Dict[str, Any]], target_lang: str, source_lang: Optional[str] = None) -> Dict[str, Any]:
-    """Translate ASR segments' text into target_lang."""
+def op_translate_segments(project_id: str, segments: Any, target_lang: str, source_lang: Optional[str] = None) -> Dict[str, Any]:
+    """Translate ASR segments' text into target_lang. Accepts list or JSON/path string."""
     router = ModelRouter()
+    seg_list = _coerce_segments_arg(segments)
     tr_segs: List[Dict[str, Any]] = []
-    for s in segments:
-        txt = s.get("text", "")
+    for s in seg_list:
+        if isinstance(s, dict):
+            txt = s.get("text", "")
+        else:
+            txt = str(s)
+            s = {}
         if not txt.strip():
             tr_segs.append({**s, "text": ""})
             continue
@@ -71,11 +107,12 @@ def op_translate_segments(project_id: str, segments: List[Dict[str, Any]], targe
     out["path"] = f"/artifacts/{project_id}/media/{Path(path).name}"
     return out
 
-def op_tts(project_id: str, segments: List[Dict[str, Any]], voice: str, lang: Optional[str] = None, sample_rate: int = 24000) -> Dict[str, Any]:
+def op_tts(project_id: str, segments: Any, voice: str, lang: Optional[str] = None, sample_rate: int = 24000) -> Dict[str, Any]:
     """Synthesize translated segments to a single WAV using router.tts."""
     router = ModelRouter()
+    seg_list = _coerce_segments_arg(segments)
     t0 = time.time()
-    wav_path = router.tts(segments, voice=voice, policy_ctx={"lang": lang} if lang else None)
+    wav_path = router.tts(seg_list, voice=voice, policy_ctx={"lang": lang} if lang else None)
     out_dir = _project_dir(project_id) / "media"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_wav = out_dir / (f"tts_{Path(wav_path).stem}.wav")
@@ -97,12 +134,13 @@ def op_mux(project_id: str, src_video: str, new_audio: str) -> Dict[str, Any]:
     mux_replace_audio(src_video, new_audio, str(out_mp4))
     return {"video": f"/artifacts/{project_id}/media/{out_mp4.name}"}
 
-def op_subtitles(project_id: str, segments: List[Dict[str, Any]], kind: str = "srt") -> Dict[str, Any]:
+def op_subtitles(project_id: str, segments: Any, kind: str = "srt") -> Dict[str, Any]:
     """Write SRT (or VTT in future) from segments."""
+    seg_list = _coerce_segments_arg(segments)
     out_dir = _project_dir(project_id) / "media"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_srt = out_dir / "subtitles.srt"
-    write_srt(segments, str(out_srt))
+    write_srt(seg_list, str(out_srt))
     return {"srt": f"/artifacts/{project_id}/media/{out_srt.name}"}
 
 # ---- Registration hook ----
