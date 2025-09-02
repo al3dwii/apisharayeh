@@ -1,3 +1,4 @@
+# src/app/workflows/goal_workflow.py
 from __future__ import annotations
 
 import asyncio
@@ -5,33 +6,21 @@ from datetime import timedelta
 from typing import Any, Dict, List, Set
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy  # use RetryPolicy from common
+from temporalio.common import RetryPolicy
 
-from app.planner.schemas import PlanSpec
-from app.workflows.activities import (
-    run_node_activity,
-    emit_plan_created,
-    emit_plan_completed,
-    emit_plan_failed,
-)
+from app.planner.schemas import PlanSpec  # Pure data model; safe to import in workflow sandbox
 
 
 @workflow.defn
 class GoalWorkflow:
     def __init__(self) -> None:
-        # Simple in-memory state so callers can query progress
-        self._running: Set[str] = set()
-        self._done: Set[str] = set()
-        self._failed: Set[str] = set()
+        # Node IDs that have been HITL-approved
+        self._approved: Set[str] = set()
 
-    @workflow.query
-    def get_state(self) -> Dict[str, List[str]]:
-        """Return current node state for observability."""
-        return {
-            "running": sorted(self._running),
-            "done": sorted(self._done),
-            "failed": sorted(self._failed),
-        }
+    @workflow.signal
+    def approve(self, node_id: str) -> None:
+        """Human-in-the-loop approval for nodes that require it."""
+        self._approved.add(node_id)
 
     @workflow.run
     async def run(
@@ -41,31 +30,54 @@ class GoalWorkflow:
         run_id: str,
         plan_spec: Dict[str, Any],
     ) -> str:
+        # Parse/validate incoming spec into canonical model
         plan = PlanSpec.model_validate(plan_spec)
 
-        # Emit PlanCreated
+        # Announce plan creation (safe side-effect in an activity)
+        # NOTE: call activities by *name strings* to avoid importing non-deterministic code in the workflow sandbox
         await workflow.execute_activity(
-            emit_plan_created,
+            "emit_plan_created",
             args=[tenant_id, run_id, plan.id, plan.goal_id],
             start_to_close_timeout=timedelta(seconds=10),
         )
 
-        # Build dependency map and node lookup
+        # Hard validate plan against the tool registry (fail fast)
+        try:
+            await workflow.execute_activity(
+                "validate_plan_activity",
+                args=[tenant_id, plan_spec],
+                start_to_close_timeout=timedelta(seconds=20),
+            )
+        except Exception:
+            await workflow.execute_activity(
+                "emit_plan_failed",
+                args=[tenant_id, run_id, plan.id, "__validation__"],
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            raise
+
+        # Build dependency & lookup helpers
         deps: Dict[str, Set[str]] = {n.id: set(n.depends_on) for n in plan.nodes}
         node_by_id: Dict[str, Any] = {n.id: n.model_dump() for n in plan.nodes}
-
-        # Use the same sets for local logic and query visibility
-        done: Set[str] = self._done
-        running: Set[str] = self._running
+        done: Set[str] = set()
+        running: Set[str] = set()
 
         async def runnable() -> List[str]:
-            return [
-                nid
-                for nid, d in deps.items()
-                if nid not in done and nid not in running and d.issubset(done)
-            ]
+            """Nodes ready to run: deps satisfied, not running/done, and (if required) approved."""
+            ready: List[str] = []
+            for nid, d in deps.items():
+                if nid in done or nid in running:
+                    continue
+                if not d.issubset(done):
+                    continue
+                node = node_by_id[nid]
+                needs_approval = bool(node.get("inputs", {}).get("requires_approval"))
+                if needs_approval and nid not in self._approved:
+                    continue
+                ready.append(nid)
+            return ready
 
-        # Ensure we always have at least 1 slot; if unspecified, allow all nodes.
+        # Scheduling loop with per-plan concurrency cap (>=1)
         max_cc = max(1, getattr(plan, "max_concurrency", 0) or len(plan.nodes) or 1)
 
         while len(done) < len(plan.nodes):
@@ -80,16 +92,14 @@ class GoalWorkflow:
                 await workflow.sleep(0.05)
                 continue
 
-            # Start all currently-runnable nodes
             tasks = []
             for nid in ready:
                 running.add(nid)
                 node = node_by_id[nid]
                 tasks.append(
                     workflow.execute_activity(
-                        run_node_activity,
+                        "run_node_activity",
                         args=[tenant_id, run_id, plan.id, node],
-                        # activity runtime controls
                         start_to_close_timeout=timedelta(minutes=30),
                         heartbeat_timeout=timedelta(seconds=30),
                         retry_policy=RetryPolicy(
@@ -100,24 +110,21 @@ class GoalWorkflow:
                     )
                 )
 
-            # Wait for this batch; mark state and propagate any failure
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for nid, res in zip(ready, results):
                 running.discard(nid)
                 if isinstance(res, Exception):
-                    self._failed.add(nid)
+                    # Mark plan failed at first failing node and surface error
                     await workflow.execute_activity(
-                        emit_plan_failed,
+                        "emit_plan_failed",
                         args=[tenant_id, run_id, plan.id, nid],
                         start_to_close_timeout=timedelta(seconds=10),
                     )
-                    # Fail the workflow so callers see the error
                     raise res
                 done.add(nid)
 
-        # All nodes done
         await workflow.execute_activity(
-            emit_plan_completed,
+            "emit_plan_completed",
             args=[tenant_id, run_id, plan.id],
             start_to_close_timeout=timedelta(seconds=10),
         )

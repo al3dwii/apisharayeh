@@ -1,34 +1,55 @@
-# src/app/workflows/activities.py
-
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any, Dict
 
+import httpx
 from temporalio import activity
 
 from app.services.event_bus import EventEnvelope, emit, now_ms
 from app.tools.runtime_ray import run_tool
 
 
-# ---------------------------
-# helpers
-# ---------------------------
+# ---------- helpers ----------
 def _idem_key(node: Dict[str, Any]) -> str:
-    """Deterministic idempotency key for a tool invocation."""
     h = hashlib.sha256()
-    h.update(str(node.get("tool_id", "")).encode())
+    h.update(node["tool_id"].encode())
     h.update(json.dumps(node.get("inputs", {}), sort_keys=True).encode())
     return h.hexdigest()
 
 
-# ---------------------------
-# plan-level events
-# ---------------------------
+async def _opa_allow(payload: Dict[str, Any]) -> bool:
+    """
+    Call OPA with POST and an `input` object.
+    If OPA_URL is unset, allow. If set and any error occurs, fail closed (deny).
+    """
+    opa_url = os.getenv("OPA_URL")
+    if not opa_url:
+        return True
+
+    body = {"input": payload}
+    try:
+        async with httpx.AsyncClient(timeout=5) as x:
+            resp = await x.post(opa_url, json=body)
+        if resp.status_code != 200:
+            # Log body for debugging but deny
+            print(f"[activities] OPA non-200 ({resp.status_code}) body={resp.text}")
+            return False
+        data = resp.json()
+        allowed = bool(data.get("result", False))
+        if not allowed:
+            print(f"[activities] OPA deny result=false payload={body} resp={data}")
+        return allowed
+    except Exception as e:
+        print(f"[activities] OPA error calling {opa_url}: {e!r} payload={body}")
+        return False
+
+
+# ---------- event emit activities ----------
 @activity.defn
 async def emit_plan_created(tenant_id: str, run_id: str, plan_id: str, goal_id: str) -> None:
-    """Plan created (safe side-effect emitted from activity)."""
     await emit(
         EventEnvelope(
             id=f"{plan_id}:created",
@@ -45,7 +66,6 @@ async def emit_plan_created(tenant_id: str, run_id: str, plan_id: str, goal_id: 
 
 @activity.defn
 async def emit_plan_completed(tenant_id: str, run_id: str, plan_id: str) -> None:
-    """Plan completed (all nodes done)."""
     await emit(
         EventEnvelope(
             id=f"{plan_id}:completed",
@@ -61,7 +81,6 @@ async def emit_plan_completed(tenant_id: str, run_id: str, plan_id: str) -> None
 
 @activity.defn
 async def emit_plan_failed(tenant_id: str, run_id: str, plan_id: str, node_id: str) -> None:
-    """Plan failed because a node failed; workflow handles failure propagation."""
     await emit(
         EventEnvelope(
             id=f"{plan_id}:{node_id}:failed",
@@ -76,89 +95,79 @@ async def emit_plan_failed(tenant_id: str, run_id: str, plan_id: str, node_id: s
     )
 
 
-# ---------------------------
-# node execution
-# ---------------------------
+# ---------- (optional) plan validation against registry ----------
+@activity.defn
+async def validate_plan_activity(tenant_id: str, plan_spec: Dict[str, Any]) -> None:
+    # Minimal slice: no-op. (Registry/schema checks can be added here.)
+    return None
+
+
+# ---------- node run activity ----------
 @activity.defn
 async def run_node_activity(
-    tenant_id: str,
-    run_id: str,
-    plan_id: str,
-    node: Dict[str, Any],
+    tenant_id: str, run_id: str, plan_id: str, node: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Execute a single plan node (tool invocation).
-
-    Contract:
-      - Emits NodeStarted / NodeSucceeded / NodeFailed to the event bus.
-      - Returns the tool result dict on success (must contain {"ok": True, ...}).
-      - Raises on failure so the workflow can decide how to react.
-    """
-    # Copy & ensure idempotency key
     node = dict(node)
     node.setdefault("idempotency_key", _idem_key(node))
 
-    # Emit "started"
+    # NodeStarted
     await emit(
         EventEnvelope(
-            id=f"{node['id']}:start",
+            id=node["id"] + ":start",
             tenant_id=tenant_id,
             run_id=run_id,
-            plan_id=plan_id,
-            node_id=node["id"],
             type="NodeStarted",
             data={"node": node},
             ts_ms=now_ms(),
+            node_id=node["id"],
+            plan_id=plan_id,
         )
     )
 
-    # Execute tool
-    try:
-        out = await run_tool(node)
-    except Exception as e:
-        # Emit "failed" then re-raise to fail the activity
+    # --- OPA policy gate (deny tenant/tool combos) ---
+    allowed = await _opa_allow({"tenant": tenant_id, "tool_id": node["tool_id"]})
+    if not allowed:
+        msg = f"policy denied: tenant={tenant_id} tool={node['tool_id']}"
         await emit(
             EventEnvelope(
-                id=f"{node['id']}:failed",
+                id=node["id"] + ":denied",
                 tenant_id=tenant_id,
                 run_id=run_id,
-                plan_id=plan_id,
-                node_id=node["id"],
                 type="NodeFailed",
-                data={"node": node, "error": str(e)},
+                data={"node": node, "error": msg},
                 ts_ms=now_ms(),
+                node_id=node["id"],
+                plan_id=plan_id,
             )
         )
-        raise
+        raise RuntimeError(msg)
 
-    # Tool returned a structured failure
-    if not out.get("ok", False):
+    # Execute the tool
+    out = await run_tool(node)
+    if not out.get("ok"):
         await emit(
             EventEnvelope(
-                id=f"{node['id']}:failed",
                 tenant_id=tenant_id,
                 run_id=run_id,
                 plan_id=plan_id,
                 node_id=node["id"],
                 type="NodeFailed",
                 data={"node": node, "error": out.get("error")},
-                ts_ms=now_ms(),
             )
         )
-        raise RuntimeError(out.get("error") or f"tool {node.get('tool_id')} failed")
+        raise RuntimeError(out.get("error") or (f"tool {node.get('tool_id')} failed"))
 
-    # Emit "succeeded"
+    # NodeSucceeded
     await emit(
         EventEnvelope(
-            id=f"{node['id']}:done",
+            id=node["id"] + ":done",
             tenant_id=tenant_id,
             run_id=run_id,
-            plan_id=plan_id,
-            node_id=node["id"],
             type="NodeSucceeded",
             data={"node": node, "result": out},
             ts_ms=now_ms(),
+            node_id=node["id"],
+            plan_id=plan_id,
         )
     )
-
     return out

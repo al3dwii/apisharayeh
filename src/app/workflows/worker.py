@@ -1,43 +1,47 @@
 from __future__ import annotations
-import asyncio, os, sys
+
+import asyncio
+import os
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from app.workflows.goal_workflow import GoalWorkflow
-from app.workflows import activities as activities_mod
+from app.workflows.activities import (
+    run_node_activity,
+    emit_plan_created,
+    emit_plan_completed,
+    emit_plan_failed,
+    validate_plan_activity,
+)
+from app.obs.metrics import boot_metrics
 
-TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
-TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "o2-default")
 
-async def connect_temporal(addr: str, attempts: int = 60, delay: float = 1.0) -> Client:
-    last = None
-    for _ in range(attempts):
-        try:
-            return await Client.connect(addr)
-        except Exception as e:
-            last = e
-            await asyncio.sleep(delay)
-    raise RuntimeError(f"Temporal connect failed after {attempts} attempts to {addr}") from last
+async def main() -> None:
+    addr = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
+    task_queue = os.getenv("TASK_QUEUE", "o2-default")
 
-async def main():
-    print(f"[worker] connecting to Temporal at {TEMPORAL_ADDRESS} ...")
-    client = await connect_temporal(TEMPORAL_ADDRESS)
+    print("[worker] connecting to Temporal at", addr, "...")
+    client = await Client.connect(addr)
+    print("[worker] connected. task_queue=", task_queue)
+
+    # Start Prometheus exporter
+    boot_metrics()
+
+    # Start worker
     worker = Worker(
         client,
-        task_queue=TASK_QUEUE,
+        task_queue=task_queue,
         workflows=[GoalWorkflow],
         activities=[
-            activities_mod.emit_plan_created,
-            activities_mod.emit_plan_completed,
-            activities_mod.emit_plan_failed,
-            activities_mod.run_node_activity,
+            run_node_activity,
+            emit_plan_created,
+            emit_plan_completed,
+            emit_plan_failed,
+            validate_plan_activity,
         ],
     )
-    print(f"[worker] connected. task_queue={TASK_QUEUE}")
     await worker.run()
 
+
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        sys.exit(0)
+    asyncio.run(main())
